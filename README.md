@@ -1,4 +1,7 @@
 # ![Logo](https://raw.githubusercontent.com/darklordgrep/PLSQL-Shapefile/main/shapfile_logo.png) PLSQL Shapefile 
+~~~
+Version 1.0 $Revision: 17584 $ $Date: 2022-10-28 10:05:11 -0500 (Fri, 28 Oct 2022) $
+~~~
 
 ## Overview
 The PLSQL Shapefile Component consists of utilities for reading and writing shapefiles. The shapefile is a file format commonly used in GIS software such as ArcGIS and Geomedia. 
@@ -23,5 +26,3 @@ See shapefile_reader.typ, shapefile_write.typ, and shapefile_util.pks for usage 
 
 ## Testing
 The [utPLSQL](https://github.com/utPLSQL/utPLSQL) library is required for testing. To test PL/SQL Shapefile, install the APEX application, shapefile_demo_application.sql. It includes the same test data in the file, shapefile_util_testdata.zip. There is a Testing tab for running unit tests.
-
-
