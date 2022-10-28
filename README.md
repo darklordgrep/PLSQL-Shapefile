@@ -1,6 +1,4 @@
-# PLSQL Shapefile 
-![Logo](shapefile_logo.png)
-10/28/2022
+# ![Logo](https://raw.githubusercontent.com/darklordgrep/PLSQL-Shapefile/main/shapfile_logo.png) PLSQL Shapefile 
 
 ## Overview
 The PLSQL Shapefile Component consists of utilities for reading and writing shapefiles. The shapefile is a file format commonly used in GIS software such as ArcGIS and Geomedia. 
