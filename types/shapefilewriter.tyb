@@ -1,0 +1,513 @@
+create or replace type body ShapefileWriter is
+  constructor function  ShapefileWriter return self as result is
+    l_date varchar2(8);
+    i pls_integer;
+  begin
+    self.m_fieldDefs := shapefiledbffieldlist();
+    self.m_fields := shapefiledbffieldlist();
+  
+    dbms_lob.createtemporary(self.m_shpfile, true);
+    dbms_lob.createtemporary(self.m_shxfile, true);
+    dbms_lob.createtemporary(self.m_dbffile, true);
+    dbms_lob.open(self.m_shpfile, dbms_lob.lob_readwrite);
+    dbms_lob.open(self.m_shxfile, dbms_lob.lob_readwrite);
+    dbms_lob.open(self.m_dbffile, dbms_lob.lob_readwrite);
+  
+    -- write header. Use placeholders for values to be determined later.
+    writeAppendIntegerShpShx(9994, 1);
+    writeAppendIntegerShpShx(0, 1);
+    writeAppendIntegerShpShx(0, 1);
+    writeAppendIntegerShpShx(0, 1);
+    writeAppendIntegerShpShx(0, 1);
+    writeAppendIntegerShpShx(0, 1);
+    writeAppendIntegerShpShx(0, 1);
+    writeAppendIntegerShpShx(1000, 2);
+    writeAppendIntegerShpShx(0, 2);
+   
+    -- bounds
+    for i in 1..8 loop
+      writeAppendDoubleShpShx(0, 2);
+    end loop;
+
+    -- write dbase file header, use sysdate for date stamp.
+    dbms_lob.writeappend(self.m_dbffile, 1, utl_raw.cast_to_raw(chr(3)));
+    dbms_lob.writeappend(self.m_dbffile, 1, utl_raw.cast_from_binary_integer(to_char(sysdate, 'YYYY') - 1900, utl_raw.little_endian));
+    dbms_lob.writeappend(self.m_dbffile, 1, utl_raw.cast_from_binary_integer(to_char(sysdate, 'MM') + 0, utl_raw.little_endian));
+    dbms_lob.writeappend(self.m_dbffile, 1, utl_raw.cast_from_binary_integer(to_char(sysdate, 'DD') + 0, utl_raw.little_endian));
+    for i in 1..7 loop
+      dbms_lob.writeappend(self.m_dbffile, 4, utl_raw.cast_from_binary_integer(0, utl_raw.little_endian));
+    end loop;
+    
+    -- initialize record index and global extent. 
+    self.m_minx := -9999999;
+    self.m_miny := -9999999;
+    self.m_maxx := -9999999;
+    self.m_maxy := -9999999;
+    self.m_minm := -9999999;
+    self.m_maxm := -9999999;
+    self.m_minz := -9999999;
+    self.m_maxz := -9999999;
+    self.m_initializeTable := 1;
+    self.m_nrows := 0;
+    self.m_filelength := 50;
+    return;
+  end;
+  
+  member procedure configureStringColumn(p_column_name in varchar2, p_length in integer) is
+    l_fieldDef shapefiledbffield;
+  begin
+    l_fieldDef := shapefiledbffield();
+    l_fieldDef.name := p_column_name;
+    l_fieldDef.fieldType := 'C';
+    l_fieldDef.fieldLength := p_length;
+    l_fieldDef.decimalCount := 0;
+    self.m_fieldDefs.extend;
+    self.m_fieldDefs(self.m_fieldDefs.last) := l_fieldDef;
+  end;
+  
+  member procedure configureNumberColumn(p_column_name in varchar2, p_length in integer, p_decimal_count in integer) is
+    l_fieldDef shapefiledbffield;
+  begin
+    l_fieldDef := shapefiledbffield();
+    l_fieldDef.name := p_column_name;
+    l_fieldDef.fieldType := 'N';
+    l_fieldDef.fieldLength := p_length;
+    l_fieldDef.decimalCount := p_decimal_count;
+    self.m_fieldDefs.extend;
+    self.m_fieldDefs(self.m_fieldDefs.last) := l_fieldDef;
+  end;
+  
+  member procedure configureIntegerColumn(p_column_name in varchar2, p_length in integer) is
+  begin
+    self.configureNumberColumn(p_column_name, p_length, 0);
+  end;
+  
+  member procedure configureDateColumn(p_column_name in varchar2) is
+    l_fieldDef shapefiledbffield;
+  begin
+    l_fieldDef := shapefiledbffield();
+    l_fieldDef.name := p_column_name;
+    l_fieldDef.fieldType := 'D';
+    l_fieldDef.fieldLength := 8;
+    l_fieldDef.decimalCount := 0;
+    self.m_fieldDefs.extend;
+    self.m_fieldDefs(self.m_fieldDefs.last) := l_fieldDef;
+  end;
+  
+  member procedure writeAppendIntegerShp(val in pls_integer, endianess in pls_integer default 2) is
+    buffsize pls_integer := 4;
+  begin
+    dbms_lob.writeappend(self.m_shpfile, buffsize, utl_raw.cast_from_binary_integer(val, endianess));
+  end;
+  
+  member procedure writeAppendIntegerShpShx(val in pls_integer, endianess in pls_integer default 2) is
+    buffsize pls_integer := 4;
+  begin
+    dbms_lob.writeappend(self.m_shpfile, buffsize, utl_raw.cast_from_binary_integer(val, endianess));
+    dbms_lob.writeappend(self.m_shxfile, buffsize, utl_raw.cast_from_binary_integer(val, endianess));
+  end;
+  
+  member procedure writeIntegerShpShx(pos in pls_integer, val in pls_integer, endianess in pls_integer default 2) is
+    buffsize pls_integer := 4;
+  begin
+    dbms_lob.write(self.m_shpfile, buffsize, pos, utl_raw.cast_from_binary_integer(val, endianess));
+    dbms_lob.write(self.m_shxfile, buffsize, pos, utl_raw.cast_from_binary_integer(val, endianess));
+  end;
+  
+  member procedure writeAppendDoubleShp(val in binary_double, endianess in pls_integer default 2) is
+    buffsize pls_integer := 8;
+  begin
+    dbms_lob.writeappend(self.m_shpfile, buffsize, utl_raw.cast_from_binary_double(val, endianess));
+  end;
+  
+  member procedure writeAppendDoubleShpShx(val in binary_double, endianess in pls_integer default 2) is
+    buffsize pls_integer := 8;
+  begin
+    dbms_lob.writeappend(self.m_shpfile, buffsize, utl_raw.cast_from_binary_double(val, endianess));
+    dbms_lob.writeappend(self.m_shxfile, buffsize, utl_raw.cast_from_binary_double(val, endianess));
+  end;
+  
+  member procedure writeIntegerShp(pos in pls_integer, val in pls_integer, endianess in pls_integer default 2) is
+    buffsize pls_integer := 4;
+  begin
+    dbms_lob.write(self.m_shpfile, pos, buffsize, utl_raw.cast_from_binary_integer(val, endianess));
+  end;
+  
+  member procedure setSpatialReferenceText(p_wkt in varchar2) is
+  begin
+    dbms_lob.createtemporary(self.m_prjfile, true);
+    dbms_lob.open(self.m_prjfile, dbms_lob.lob_readwrite);
+    dbms_lob.writeappend(self.m_prjfile, dbms_lob.getlength(p_wkt), utl_raw.cast_to_raw(p_wkt));
+    dbms_lob.close(self.m_prjfile);
+  end;
+
+  member procedure append(p_shape in sdo_geometry, p_attributes in clob) is
+    l_row json_object_t;
+    l_colnames json_key_list;
+    i pls_integer;
+    j pls_integer;
+    l_fields ShapefileDBFFieldList;
+    l_field ShapefileDBFField;
+    l_fieldattr json_element_t;
+    l_minx binary_double := -9999999;
+    l_miny binary_double := -9999999;
+    l_maxx binary_double := -9999999;
+    l_maxy binary_double := -9999999;
+    l_minm binary_double := -9999999;
+    l_maxm binary_double := -9999999;
+    l_minz binary_double := -9999999;
+    l_maxz binary_double := -9999999;
+    l_shape2d sdo_geometry;
+    l_recordLength pls_integer;
+    j pls_integer;
+    t1 timestamp;
+    l_fieldval varchar2(255);
+    l_fieldnum number;
+    l_gtype_d pls_integer;
+    l_gtype_l pls_integer;
+    l_gtype_s pls_integer;
+  begin
+    t1 := systimestamp;
+    l_row := json_object_t(p_attributes);
+    l_colnames := l_row.get_keys();
+    
+    -- initialize geometry and attribute data on first read
+    if self.m_initializeTable = 1 then
+      self.m_initializeTable := 0;      
+      self.m_columncount := l_colnames.count;
+      
+      --write the dbf field headers
+      l_fields := ShapefileDBFFieldList();
+      for i in 1..l_colnames.count loop
+        -- check field name is not too long.
+        if length(l_colnames(i)) > 11 then
+          raise_application_error(-20881, 'Invalid column name length. It must be 11 characters or less');
+        end if;
+        
+        --check if there is a predefined configuration for the column based on the attribute name
+        l_field := null;
+        for j in 1..self.m_fieldDefs.count loop
+          if self.m_fieldDefs(j).name = l_colnames(i) then
+            l_field := self.m_fieldDefs(j);
+          end if;
+        end loop;
+        
+        -- no predefined column configuration, use a 254 character string column definition.
+        if l_field is null then
+          l_field := ShapefileDBFField();
+        
+          l_field.name := l_colnames(i);
+          l_fieldattr := l_row.get(l_colnames(i));
+          l_field.fieldType := 'C';
+          l_field.address := 0;
+          l_field.fieldLength := 254;
+          l_field.decimalCount := 0;
+        end if;
+        self.m_fields.extend;
+        self.m_fields(self.m_fields.last) := l_field;
+        dbms_lob.writeappend(self.m_dbffile, 11, utl_raw.cast_to_raw(rpad(l_field.name, 11, chr(0))));
+        dbms_lob.writeappend(self.m_dbffile, 1, utl_raw.cast_to_raw(l_field.fieldType));
+        dbms_lob.writeappend(self.m_dbffile, 4, utl_raw.cast_from_binary_integer(0, utl_raw.little_endian));
+        dbms_lob.writeappend(self.m_dbffile, 1, utl_raw.cast_from_binary_integer(l_field.fieldLength, utl_raw.little_endian));
+        dbms_lob.writeappend(self.m_dbffile, 1, utl_raw.cast_from_binary_integer(l_field.decimalCount, utl_raw.little_endian));
+        dbms_lob.writeappend(self.m_dbffile, 4, utl_raw.cast_from_binary_integer(0, utl_raw.little_endian));
+        dbms_lob.writeappend(self.m_dbffile, 4, utl_raw.cast_from_binary_integer(0, utl_raw.little_endian));
+        dbms_lob.writeappend(self.m_dbffile, 4, utl_raw.cast_from_binary_integer(0, utl_raw.little_endian));
+        dbms_lob.writeappend(self.m_dbffile, 2, utl_raw.cast_from_binary_integer(0, utl_raw.little_endian));
+      end loop;
+      dbms_lob.writeappend(self.m_dbffile, 1, utl_raw.cast_to_raw(chr(13)));
+      dbms_lob.writeappend(self.m_dbffile, 1, utl_raw.cast_to_raw(' '));
+
+      --if p_shape.sdo_gtype = 2001 or p_shape.sdo_gtype = 3001 or p_shape.sdo_gtype = 4001 then
+      l_gtype_s :=  mod(p_shape.sdo_gtype, 100);
+      l_gtype_l := floor(mod(p_shape.sdo_gtype, 1000) / 100);
+      l_gtype_d := floor(p_shape.sdo_gtype / 1000);
+      
+      -- not writing PointM (type 21) since Oracle sdo geometry points only have X,Y,Z (no m).
+      -- 3301 gtypes will be written as Point (type 1), throwing out the M values.
+      if p_shape.sdo_gtype = 2001 or p_shape.sdo_gtype = 3301 then
+        self.m_shpShapeType := 1;
+      elsif p_shape.sdo_gtype = 3001 then
+        self.m_shpShapeType := 11;
+      elsif p_shape.sdo_gtype = 2002 then
+        self.m_shpShapeType := 3;
+      elsif p_shape.sdo_gtype = 4402 or p_shape.sdo_gtype = 4002  then
+        self.m_shpShapeType := 13;
+      elsif p_shape.sdo_gtype = 2003 or p_shape.sdo_gtype = 2007 then
+        self.m_shpShapeType := 5;
+      elsif p_shape.sdo_gtype = 3302 then
+        self.m_shpShapeType := 23;
+      else
+        raise_application_error(-20854, 'Geometry gtype not implemented [' || p_shape.sdo_gtype || ']');
+      end if;
+
+      if l_gtype_d = 4 then
+        self.m_hasm := 1;
+        self.m_hasz := 1;
+      elsif l_gtype_d = 3 then
+        if l_gtype_l = 3 then
+          self.m_hasm := 1;
+          self.m_hasz := 0;
+        else
+          self.m_hasm := 0;
+          self.m_hasz := 1;
+        end if;
+      elsif l_gtype_d = 2 then
+          self.m_hasm := 0;
+          self.m_hasz := 0;
+      end if;
+      if self.m_hasm is null or self.m_hasz is null then
+        raise_application_error(-20855, 'Could not determine dimensionality [' || p_shape.sdo_gtype || ']');
+      end if;
+      
+    end if;
+    -- end of initialization
+    
+    m_nrows := m_nrows + 1;
+    writeAppendIntegerShp(m_nrows, utl_raw.big_endian);
+    dbms_lob.writeappend(self.m_shxfile, 4, utl_raw.cast_from_binary_integer(self.m_filelength, utl_raw.big_endian));
+    if self.m_shpShapeType in (1, 11) then
+      writeAppendIntegerShpShx(10 + self.m_hasz * 8, utl_raw.big_endian);
+      writeAppendIntegerShp(self.m_shpShapeType);
+      
+      -- update the global extent
+      if self.m_minx = -9999999 or p_shape.sdo_point.x < self.m_minx then
+        self.m_minx := p_shape.sdo_point.x;
+      end if;
+      if self.m_maxx = -9999999 or p_shape.sdo_point.x > self.m_maxx then
+        self.m_maxx := p_shape.sdo_point.x;
+      end if;
+      if self.m_miny = -9999999 or p_shape.sdo_point.y < self.m_miny then
+        self.m_miny := p_shape.sdo_point.y;
+      end if;
+      if self.m_maxy = -9999999 or p_shape.sdo_point.y > self.m_maxy then
+        self.m_maxy := p_shape.sdo_point.y;
+      end if;
+      
+      writeAppendDoubleShp(p_shape.sdo_point.x);
+      writeAppendDoubleShp(p_shape.sdo_point.y);
+      if self.m_hasz = 1 then 
+        writeAppendDoubleShp(p_shape.sdo_point.z);
+        writeAppendDoubleShp(0);
+        if self.m_minz = -9999999 or p_shape.sdo_point.z < self.m_minz then
+          self.m_minz := p_shape.sdo_point.z;
+        end if;
+        if self.m_maxz = -9999999 or p_shape.sdo_point.z > self.m_maxz then
+          self.m_maxz := p_shape.sdo_point.z;
+        end if;
+      end if;
+      self.m_filelength := self.m_filelength + 14 + self.m_hasz * 8;
+    elsif self.m_shpShapeType = 3 or self.m_shpShapeType = 5 or self.m_shpShapeType = 13  or self.m_shpshapeType = 23 then
+      l_recordLength := (44 + 4 * (p_shape.sdo_elem_info.count / 3) + 8 * p_shape.sdo_ordinates.count + (self.m_hasz * 16 + self.m_hasm *16) ) / 2 ; 
+      writeAppendIntegerShpShx(l_recordLength, utl_raw.big_endian);
+      writeAppendIntegerShp(self.m_shpShapeType);
+      l_shape2d := sdo_cs.make_2d(p_shape);
+      
+      l_minx := sdo_geom.sdo_min_mbr_ordinate(l_shape2d, 1);
+      l_miny := sdo_geom.sdo_min_mbr_ordinate(l_shape2d, 2);
+      l_maxx := sdo_geom.sdo_max_mbr_ordinate(l_shape2d, 1);
+      l_maxy := sdo_geom.sdo_max_mbr_ordinate(l_shape2d, 2);
+      
+      if self.m_minx = -9999999 or l_minx < self.m_minx then
+        self.m_minx := l_minx;
+      end if;      
+      if self.m_maxx = -9999999 or l_maxx > self.m_maxx then
+        self.m_maxx := l_maxx;
+      end if;
+      if self.m_miny = -9999999 or l_miny < self.m_miny then
+        self.m_miny := l_miny;
+      end if;
+      if self.m_maxy = -9999999 or l_maxy > self.m_maxy then
+        self.m_maxy := l_maxy;
+      end if;
+
+      dbms_lob.writeappend(self.m_shpfile, 8, utl_raw.cast_from_binary_double(l_minx, utl_raw.little_endian));
+      dbms_lob.writeappend(self.m_shpfile, 8, utl_raw.cast_from_binary_double(l_miny, utl_raw.little_endian));
+      dbms_lob.writeappend(self.m_shpfile, 8, utl_raw.cast_from_binary_double(l_maxx, utl_raw.little_endian));
+      dbms_lob.writeappend(self.m_shpfile, 8, utl_raw.cast_from_binary_double(l_maxy, utl_raw.little_endian));
+      dbms_lob.writeappend(self.m_shpfile, 4, utl_raw.cast_from_binary_integer(p_shape.sdo_elem_info.count / 3, utl_raw.little_endian));
+      dbms_lob.writeappend(self.m_shpfile, 4, utl_raw.cast_from_binary_integer(p_shape.sdo_ordinates.count / (2 + self.m_hasm + self.m_hasz), utl_raw.little_endian));
+
+      i := 1;
+      while i < p_shape.sdo_elem_info.count loop
+        dbms_lob.writeappend(self.m_shpfile, 4, utl_raw.cast_from_binary_integer((p_shape.sdo_elem_info(i) - 1) / 2, utl_raw.little_endian));
+        i := i + 3;
+      end loop;
+      
+      i := 1;
+      while i < p_shape.sdo_ordinates.count loop
+        dbms_lob.writeappend(self.m_shpfile, 8, utl_raw.cast_from_binary_double(p_shape.sdo_ordinates(i), utl_raw.little_endian));
+        i := i + 1;
+        dbms_lob.writeappend(self.m_shpfile, 8, utl_raw.cast_from_binary_double(p_shape.sdo_ordinates(i), utl_raw.little_endian));
+        i := i + 1 + self.m_hasm + self.m_hasz;
+      end loop;
+    
+      if self.m_hasz = 1 then
+        i := -1 * floor(mod(p_shape.sdo_gtype, 1000) / 100) + 7;
+        while i <= p_shape.sdo_ordinates.count loop
+          if l_minz = -9999999 or l_minz > p_shape.sdo_ordinates(i) then
+            l_minz := p_shape.sdo_ordinates(i);
+          end if;
+          if l_maxz = -9999999 or l_maxz <  p_shape.sdo_ordinates(i) then
+            l_maxz := p_shape.sdo_ordinates(i);
+          end if;
+          i := i + floor(p_shape.sdo_gtype / 1000);
+        end loop;
+        dbms_lob.writeappend(self.m_shpfile, 8, utl_raw.cast_from_binary_double(l_minz, utl_raw.little_endian));
+        dbms_lob.writeappend(self.m_shpfile, 8, utl_raw.cast_from_binary_double(l_maxz, utl_raw.little_endian));
+        i := -1 * floor(mod(p_shape.sdo_gtype, 1000) / 100) + 7;
+        while i <= p_shape.sdo_ordinates.count loop
+          dbms_lob.writeappend(self.m_shpfile, 8, utl_raw.cast_from_binary_double(p_shape.sdo_ordinates(i), utl_raw.little_endian));
+          i := i + floor(p_shape.sdo_gtype / 1000);
+        end loop;
+      end if;
+      
+      if self.m_hasm = 1 then
+        i := floor(mod(p_shape.sdo_gtype, 1000) / 100);
+        while i <= p_shape.sdo_ordinates.count loop
+          if l_minm = -9999999 or l_minm > p_shape.sdo_ordinates(i) then
+            l_minm := p_shape.sdo_ordinates(i);
+          end if;
+          if l_maxm = -9999999 or l_maxm <  p_shape.sdo_ordinates(i) then
+            l_maxm := p_shape.sdo_ordinates(i);
+          end if;
+          i := i + floor(p_shape.sdo_gtype / 1000);
+        end loop;
+        dbms_lob.writeappend(self.m_shpfile, 8, utl_raw.cast_from_binary_double(l_minm, utl_raw.little_endian));
+        dbms_lob.writeappend(self.m_shpfile, 8, utl_raw.cast_from_binary_double(l_maxm, utl_raw.little_endian));
+        i := floor(mod(p_shape.sdo_gtype, 1000) / 100);
+        while i <= p_shape.sdo_ordinates.count loop
+          dbms_lob.writeappend(self.m_shpfile, 8, utl_raw.cast_from_binary_double(p_shape.sdo_ordinates(i), utl_raw.little_endian));
+          i := i + floor(p_shape.sdo_gtype / 1000);
+        end loop;
+      end if;
+      
+      if self.m_hasm = 1 then
+        if self.m_minm = -9999999 or l_minm < self.m_minm then
+          self.m_minm := l_minm;
+        end if;
+        if self.m_maxm = -9999999 or l_maxm > self.m_maxm then
+          self.m_maxm := l_maxm;
+        end if;
+      end if;
+      if self.m_hasz = 1 then
+        if self.m_minz = -9999999 or l_minz < self.m_minz then
+          self.m_minm := l_minm;
+        end if;
+        if self.m_maxz = -9999999 or l_maxz > self.m_maxz then
+          self.m_maxz := l_maxz;
+        end if;
+      end if;
+      self.m_filelength := self.m_filelength + l_recordLength + 4;
+    else
+      raise_application_error(-20881, 'Shape type not implemented');
+    end if;
+    for i in 1..self.m_fields.count loop
+      if self.m_fields(i).fieldType = 'C' then
+        l_fieldval := l_row.get_string(self.m_fields(i).name);
+        if l_fieldval is null then
+          dbms_lob.writeappend(self.m_dbffile, self.m_fields(i).fieldLength, utl_raw.cast_to_raw(rpad(' ', self.m_fields(i).fieldLength, ' ')));
+        else
+          dbms_lob.writeappend(self.m_dbffile, self.m_fields(i).fieldLength, utl_raw.cast_to_raw(rpad(nvl(l_fieldval, ''), self.m_fields(i).fieldLength, ' ')));
+        end if;
+      elsif self.m_fields(i).fieldType = 'D' then
+        l_fieldval := l_row.get_string(self.m_fields(i).name);
+        if l_fieldval is null then
+          dbms_lob.writeappend(self.m_dbffile, self.m_fields(i).fieldLength, utl_raw.cast_to_raw(rpad(' ', self.m_fields(i).fieldLength, ' ')));
+        else
+          l_fieldval := to_char(l_row.get_date(self.m_fields(i).name), 'YYYYMMDD');
+          dbms_lob.writeappend(self.m_dbffile, self.m_fields(i).fieldLength, utl_raw.cast_to_raw(rpad(nvl(l_fieldval, ''), self.m_fields(i).fieldLength, ' ')));
+        end if;
+      elsif self.m_fields(i).fieldType = 'N' then
+        l_fieldnum := l_row.get_number(self.m_fields(i).name);
+        if l_fieldnum is null then 
+          dbms_lob.writeappend(self.m_dbffile, self.m_fields(i).fieldLength, utl_raw.cast_to_raw(rpad(' ', self.m_fields(i).fieldLength, ' ')));
+        else
+          dbms_lob.writeappend(self.m_dbffile, self.m_fields(i).fieldLength, utl_raw.cast_to_raw(rpad(nvl(round(l_fieldnum, self.m_fields(i).decimalCount) , ''), self.m_fields(i).fieldLength, ' ')));
+        end if;
+      else
+        raise_application_error(-20876, 'Unsupported field type [' || self.m_fields(i).fieldType || ']');
+      end if;
+    end loop;
+  end;
+  
+  member procedure finish(p_zipfile in out nocopy blob, p_featureclass in varchar2) is
+    t1 timestamp;
+    l_recordsize pls_integer := 0;
+    i pls_integer;
+  begin
+    t1 := systimestamp;
+    for i in 1..self.m_fields.count loop
+      l_recordsize := l_recordsize + self.m_fields(i).fieldLength;
+    end loop;
+    writeIntegerShpShx(25, self.m_fileLength, utl_raw.big_endian);
+    dbms_lob.write(self.m_shxfile, 4, 25, utl_raw.cast_from_binary_integer(dbms_lob.getlength(self.m_shxfile) / 2, utl_raw.big_endian));
+    writeIntegerShpShx(33, self.m_shpShapeType, utl_raw.little_endian);
+    
+    dbms_lob.write(self.m_dbffile, 4, 5, utl_raw.cast_from_binary_integer(self.m_nrows, utl_raw.little_endian));
+    dbms_lob.write(self.m_dbffile, 2, 9, utl_raw.cast_from_binary_integer(self.m_columncount * 32 + 33, utl_raw.little_endian));
+    dbms_lob.write(self.m_dbffile, 2, 11, utl_raw.cast_from_binary_integer(l_recordsize, utl_raw.little_endian));
+    dbms_lob.write(self.m_shpfile, 8, 37, utl_raw.cast_from_binary_double(self.m_minx, utl_raw.little_endian));
+    dbms_lob.write(self.m_shpfile, 8, 45, utl_raw.cast_from_binary_double(self.m_miny, utl_raw.little_endian));
+    dbms_lob.write(self.m_shpfile, 8, 53, utl_raw.cast_from_binary_double(self.m_maxx, utl_raw.little_endian));
+    dbms_lob.write(self.m_shpfile, 8, 61, utl_raw.cast_from_binary_double(self.m_maxy, utl_raw.little_endian));
+    if self.m_hasz = 1 then
+      dbms_lob.write(self.m_shpfile, 8, 69, utl_raw.cast_from_binary_double(self.m_minz, utl_raw.little_endian));
+      dbms_lob.write(self.m_shpfile, 8, 77, utl_raw.cast_from_binary_double(self.m_maxz, utl_raw.little_endian));
+    end if;
+    
+    if self.m_hasm = 1 then
+      dbms_lob.write(self.m_shpfile, 8, 85, utl_raw.cast_from_binary_double(self.m_minm, utl_raw.little_endian));
+      dbms_lob.write(self.m_shpfile, 8, 93, utl_raw.cast_from_binary_double(self.m_maxm, utl_raw.little_endian));
+    end if;
+
+    dbms_lob.close(self.m_shpfile);
+    dbms_lob.close(self.m_shxfile);
+    dbms_lob.close(self.m_dbffile);
+    
+    apex_zip.add_file (
+      p_zipped_blob => p_zipfile,
+      p_file_name   => lower(p_featureclass) || '.shp', 
+      p_content     => self.m_shpfile );
+    apex_zip.add_file (
+      p_zipped_blob => p_zipfile,
+      p_file_name   => lower(p_featureclass) || '.shx', 
+      p_content     => self.m_shxfile );
+    apex_zip.add_file (
+      p_zipped_blob => p_zipfile,
+      p_file_name   => lower(p_featureclass) || '.dbf', 
+      p_content     => self.m_dbffile );
+    if not self.m_prjfile is null then  
+      apex_zip.add_file (
+        p_zipped_blob => p_zipfile,
+        p_file_name   => lower(p_featureclass) || '.prj', 
+        p_content     => self.m_prjfile );
+    end if;
+    apex_zip.finish(p_zipped_blob => p_zipfile);
+  end;
+  
+    static function majorVersion return number is
+  begin
+    return 1;
+  end;
+
+  static function minorVersion return number is
+  begin
+    return 0;
+  end;
+
+  static function LastEditedBy return varchar2 is
+  begin
+    return '$Author: b2imimcf $';
+  end;
+
+  static function lastModifiedDate return varchar2 is
+  begin
+    return '$Date: 2022-10-27 23:34:47 -0500 (Thu, 27 Oct 2022) $';
+  end;
+
+  static function revision return varchar2 is
+  begin
+    return '$Revision: 17576 $';
+  end;
+end;

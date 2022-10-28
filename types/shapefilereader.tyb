@@ -1,0 +1,721 @@
+create or replace type body ShapefileReader is
+
+  static function readString(b in blob, pos in out pls_integer, len in pls_integer) return varchar2 is
+    buffsize pls_integer := len;
+    buffer raw(4000);
+  begin
+    dbms_lob.read(b,buffsize,pos,buffer);
+    pos:= pos + buffsize;
+    return trim(utl_raw.cast_to_varchar2(buffer));
+  end;
+
+  static function readInteger(b in blob, pos in out pls_integer, endianess in pls_integer) return pls_integer is
+    buffsize pls_integer := 4;
+    buffer raw(4);
+  begin
+    dbms_lob.read(b,buffsize,pos,buffer);
+    pos:= pos + buffsize;
+    return utl_raw.cast_to_binary_integer(buffer, endianess);
+  end;
+
+  static function readShortInteger(b in blob, pos in out pls_integer, endianess in pls_integer) return pls_integer is
+    buffsize pls_integer := 2;
+    buffer raw(2);
+  begin
+    dbms_lob.read(b,buffsize,pos,buffer);
+    pos:= pos + buffsize;
+    return utl_raw.cast_to_binary_integer(buffer, endianess);
+  end;
+
+  static function readByteInteger(b in blob, pos in out pls_integer, endianess in pls_integer) return pls_integer is
+    buffsize pls_integer := 1;
+    buffer raw(1);
+  begin
+    dbms_lob.read(b,buffsize,pos,buffer);
+    pos:= pos + buffsize;
+    return utl_raw.cast_to_binary_integer(buffer, endianess);
+  end;
+
+  static function readDouble(b in blob, pos in out pls_integer, endianess in pls_integer) return number is
+    buffsize pls_integer := 8;
+    buffer raw(8);
+  begin
+    dbms_lob.read(b,buffsize,pos,buffer);
+    pos:= pos + buffsize;
+    return utl_raw.cast_to_binary_double(buffer, endianess);
+  end;
+
+  constructor function ShapefileReader(p_shapefilezip in blob) return self as result is
+  begin
+    self := ShapefileReader(p_shapefilezip, null, null);
+    return;
+  end;
+
+  constructor function ShapefileReader(p_shapefilezip in blob, p_srid in integer) return self as result is
+  begin
+    self := ShapefileReader(p_shapefilezip, p_srid, null, 'NAVD88', 'FEET'); 
+    return;
+  end;
+
+  constructor function ShapefileReader(p_shapefilezip in blob, p_featureclass in varchar2) return self as result is
+  begin
+    self := ShapefileReader(p_shapefilezip, null, p_featureclass);
+    return;
+  end;
+
+  constructor function ShapefileReader(p_shapefilezip in blob, p_srid in integer, p_featureclass in varchar2, p_vertical_datum in varchar2 default 'NAVD88', p_vertical_units in varchar2 default 'FEET', p_force_single_part in boolean default false) return self as result is
+    l_files apex_zip.t_files;
+    l_file blob;
+    l_featureclass varchar2(400);
+
+    l_shpfile blob;
+    l_shxfile blob;
+    l_dbffile blob;
+    l_prjfile clob;
+    l_prjname varchar2(1000);
+    l_metafile clob;
+    l_dbf_pos pls_integer; -- use pls_integer locally for performance, then save to the member variable at the end of function
+
+    l_shp_pos pls_integer; -- use pls_integer locally for performance, then save to the member variable at the end of function
+    l_shp_filecode pls_integer; 
+
+    l_minm binary_double;
+    l_maxm binary_double;
+    l_minz binary_double;
+    l_maxz binary_double;
+    i pls_integer;
+  begin
+    -- open zipfile and get blob for all of the file components. If the feature class name is provided, look for its components, otherwise,
+    -- assume there is only one shapefile in the zip.
+    l_files := apex_zip.get_files(p_zipped_blob => p_shapefilezip);
+    for i in 1..l_files.count loop
+      if regexp_instr(lower(l_files(i)), l_featureclass || '\.shp$') > 0  and (p_featureclass = substr(l_files(i),1,length(l_files(i))-4) or p_featureclass is null) then
+        if (not l_shpfile is null) then
+          raise_application_error(-20480, 'Duplicate shapefile component [' || l_files(i) || ']. If zip contains multiple shapefiles, specify a feature class.');
+        end if;
+        l_shpfile := apex_zip.get_file_content(p_zipped_blob => p_shapefileZip, p_file_name => l_files(i));
+      elsif regexp_instr(lower(l_files(i)), l_featureclass || '\.shx$') > 0  and (p_featureclass = substr(l_files(i),1,length(l_files(i))-4) or p_featureclass is null) then
+        if (not l_shxfile is null) then
+          raise_application_error(-20480, 'Duplicate shapefile component [' || l_files(i) || ']. If zip contains multiple shapefiles, specify a feature class.');
+        end if;
+        l_shxfile := apex_zip.get_file_content(p_zipped_blob => p_shapefileZip, p_file_name => l_files(i));
+      elsif regexp_instr(lower(l_files(i)), l_featureclass || '\.dbf$') > 0  and (p_featureclass = substr(l_files(i),1,length(l_files(i))-4) or p_featureclass is null) then
+        if (not l_dbffile is null) then
+          raise_application_error(-20480, 'Duplicate shapefile component [' || l_files(i) || ']. If zip contains multiple shapefiles, specify a feature class.');
+        end if;
+        l_dbffile := apex_zip.get_file_content(p_zipped_blob => p_shapefileZip, p_file_name => l_files(i));
+      elsif regexp_instr(lower(l_files(i)), l_featureclass || '\.prj$') > 0  and (p_featureclass = substr(l_files(i),1,length(l_files(i))-4) or p_featureclass is null) then
+        if (not l_prjfile is null) then
+          raise_application_error(-20480, 'Duplicate shapefile component [' || l_files(i) || ']. If zip contains multiple shapefiles, specify a feature class.');
+        end if;
+        l_prjfile := to_clob(apex_zip.get_file_content(p_zipped_blob => p_shapefileZip, p_file_name => l_files(i)));
+      elsif regexp_instr(lower(l_files(i)), l_featureclass || '\.shp.xml$') > 0  and (p_featureclass = substr(l_files(i),1,length(l_files(i))-4) or p_featureclass is null) then
+        if (not l_metafile is null) then
+          raise_application_error(-20480, 'Duplicate shapefile component [' || l_files(i) || ']. If zip contains multiple shapefiles, specify a feature class.');
+        end if;
+        l_metafile := to_clob(apex_zip.get_file_content(p_zipped_blob => p_shapefileZip, p_file_name => l_files(i)));
+      end if;
+    end loop;
+
+    -- raise exception if one of the files is missing
+    if l_shpfile is null and l_shxfile is null and l_dbffile is null then
+      if not p_featureclass is null then
+        raise_application_error(-20480, 'Feature class not found [' || p_featureclass || ']');
+      else 
+        raise_application_error(-20481, 'No shapefile components found [.shp, .shx, .dbf]');
+      end if;
+    end if;
+    if l_shpfile is null then raise_application_error(-20481, 'Missing shapefile component [.shp]'); end if;
+    if l_shxfile is null then raise_application_error(-20481, 'Missing shapefile component [.shx]'); end if;
+    if l_dbffile is null then raise_application_error(-20481, 'Missing shapefile component [.dbf]'); end if;
+    if p_srid is null and l_prjfile is null then raise_application_error(-20481,'Missing shapefile component [.prj] and no input SRID provided'); end if;
+
+    self.m_dbf := l_dbffile;
+    self.m_shp := l_shpfile;
+
+    -- read dbf header
+    self.Fields := ShapefileDBFFieldList();
+    l_dbf_pos := 5;
+    self.m_dbf_nRecords := Shapefile.readInteger(self.m_dbf, l_dbf_pos, utl_raw.little_endian);
+    self.m_dbf_nHeaderBytes := Shapefile.readShortInteger(self.m_dbf, l_dbf_pos, utl_raw.little_endian);
+    self.m_dbf_nRecordBytes := Shapefile.readShortInteger(self.m_dbf, l_dbf_pos, utl_raw.little_endian);
+    l_dbf_pos := l_dbf_pos + 20;
+    self.m_dbf_nFields := floor(self.m_dbf_nHeaderBytes - 33) / 32;
+    self.Fields.extend(self.m_dbf_nFields);
+
+   -- read dbf field information
+    for i in 1..self.m_dbf_nFields loop
+      self.Fields(i) := ShapefileDBFField();
+      self.Fields(i).name := regexp_substr(Shapefile.readString(self.m_dbf, l_dbf_pos, 11), '([A-Za-z0-9_]+)', 1,1 , null, 1);
+      self.Fields(i).fieldType := Shapefile.readString(self.m_dbf, l_dbf_pos, 1);
+      self.Fields(i).address := Shapefile.readInteger(self.m_dbf, l_dbf_pos, utl_raw.little_endian);
+      self.Fields(i).fieldLength := Shapefile.readByteInteger(self.m_dbf, l_dbf_pos, utl_raw.little_endian);
+      self.Fields(i).decimalCount := Shapefile.readByteInteger(self.m_dbf, l_dbf_pos, utl_raw.little_endian);
+      l_dbf_pos := l_dbf_pos + 14;
+    end loop;
+    l_dbf_pos := l_dbf_pos + self.m_dbf_nHeaderBytes - (32* self.m_dbf_nFields + 31);
+    self.m_dbf_pos := l_dbf_pos;
+
+    -- read shp file header
+    l_shp_pos := 1;
+    l_shp_filecode := Shapefile.readInteger(self.m_shp, l_shp_pos, utl_raw.big_endian);
+    if not l_shp_filecode = 9994 then raise_application_error(-20499, 'Invalid shapefile header. First byte is [' || l_shp_filecode || '] when it should be 9994. Perhaps you renamed another type of file to give it a .shp extension.' ); end if;
+    l_shp_pos := 25;
+    self.m_shp_filelength := Shapefile.readInteger(self.m_shp, l_shp_pos, utl_raw.big_endian);
+    l_shp_pos := 33;
+    self.m_shp_shapetype  := Shapefile.readInteger(self.m_shp, l_shp_pos, utl_raw.little_endian);
+
+    -- determine whether shapefile has Z and/or M values.
+    l_shp_pos := 69;
+    l_minz  := Shapefile.readDouble(self.m_shp, l_shp_pos, utl_raw.little_endian);
+    l_maxz  := Shapefile.readDouble(self.m_shp, l_shp_pos, utl_raw.little_endian);
+    l_minm  := Shapefile.readDouble(self.m_shp, l_shp_pos, utl_raw.little_endian);
+    l_maxm  := Shapefile.readDouble(self.m_shp, l_shp_pos, utl_raw.little_endian);
+    if l_minz = 0 and l_maxz = 0 then
+      self.hasz := 0;
+    else
+      self.hasz := 1;
+    end if;
+    if l_minm = 0 and l_maxm = 0 then
+      self.hasm := 0;
+    else
+      self.hasm := 1;
+    end if;
+
+    if p_force_single_part then
+      self.m_single_part := 1;
+    else
+      self.m_single_part := 0;
+    end if;
+    -- determine the gtype and etypes to use for creating sdo_geometries (all interpreation values will be 1)
+    -- all geometries in a shapfile should have the same gtype and etype. Ignore M dimension if
+    -- the shapefile has no real m values.
+    if self.m_shp_shapetype = 1 then
+      self.m_shp_gtype := 2001;
+      self.ShapeType := 'Point';
+    elsif self.m_shp_shapetype = 3 then
+      self.m_shp_etype := 2;
+      if p_force_single_part then
+        self.m_shp_gtype := 2002;
+      else 
+        self.m_shp_gtype := 2006;
+      end if;
+      self.ShapeType := 'Line';
+    elsif self.m_shp_shapetype = 5 then
+      self.m_shp_etype := 1003;
+      self.m_shp_gtype := 2003;
+      self.ShapeType := 'Polygon';
+    elsif self.m_shp_shapetype = 8 then
+      self.m_shp_gtype := 2005;
+      self.ShapeType := 'Multipoint';
+    elsif self.m_shp_shapetype = 11 then
+      if self.hasm = 0 then
+        self.m_shp_gtype := 3001;
+      else
+        self.m_shp_gtype := 4401;
+      end if;
+      self.ShapeType := 'Point';
+    elsif self.m_shp_shapetype = 13 then
+      self.m_shp_etype := 2;
+      if self.hasm = 0  then
+        --self.m_shp_gtype := 3006;
+        if p_force_single_part then
+          self.m_shp_gtype := 3002;
+        else 
+          self.m_shp_gtype := 3006;
+        end if;
+      else
+        --self.m_shp_gtype := 4406;
+        if p_force_single_part then
+          self.m_shp_gtype := 4402;
+        else 
+          self.m_shp_gtype := 4406;
+        end if;
+      end if;
+      self.ShapeType := 'Line';
+    elsif self.m_shp_shapetype = 15 then
+      self.m_shp_etype := 1003;
+      if self.hasm = 0  then
+        self.m_shp_gtype := 3003;
+      else
+        self.m_shp_gtype := 4403;
+      end if;
+      self.ShapeType := 'Polygon';
+    elsif self.m_shp_shapetype = 18 then
+      if self.hasm = 0  then
+        self.m_shp_gtype := 3005;
+      else
+        self.m_shp_gtype := 4405;
+      end if;
+      self.ShapeType := 'Multipoint';
+    elsif self.m_shp_shapetype = 21 then
+      if self.hasm = 0  then
+        self.m_shp_gtype := 2001;
+      else
+        self.m_shp_gtype := 2001;
+      end if;
+      self.ShapeType := 'Point';
+    elsif self.m_shp_shapetype = 23 then
+      self.m_shp_etype := 2;
+      if self.hasm = 0  then
+        if p_force_single_part then
+          self.m_shp_gtype := 2002;
+        else 
+          self.m_shp_gtype := 2006;
+        end if;
+      else
+        if p_force_single_part then
+          self.m_shp_gtype := 3302;
+        else 
+          self.m_shp_gtype := 3306;
+        end if;
+      end if;
+      self.ShapeType := 'Line';
+    elsif self.m_shp_shapetype = 25 then
+      self.m_shp_etype := 1003;
+      if self.hasm = 0  then
+        self.m_shp_gtype := 2003;
+      else
+        self.m_shp_gtype := 3303;
+      end if;
+      self.ShapeType := 'Polygon';
+    elsif self.m_shp_shapetype = 28 then
+      if self.hasm = 0 then
+        self.m_shp_gtype := 2005;
+      else
+        self.m_shp_gtype := 3305;
+      end if;
+      self.ShapeType := 'Multipoint';
+    end if; 
+    
+    -- set intial words read and file pointer for reads.
+    self.m_shp_wordsRead := 0;    
+    self.m_shp_pos := 101;
+
+    -- if the srid is not provided, try to get it from the .prj file and and look it up in oracle_srid_xref table
+    if p_srid is null then 
+      select trim(regexp_substr(l_prjfile, '^....CS\[\"([^\"]+)\"', 1, 1, null, 1)) into l_prjname from dual;
+      if l_prjname is null then 
+        raise_application_error(-20484, 'Could not parse prj [' ||  l_prjfile || ']');
+      end if;
+      if self.hasZ = 1 then
+        if p_vertical_datum is null then raise_application_error(-20485, 'Missing vertical datum argument. This is required for three dimensional datasets.'); end if;
+        if p_vertical_units is null then raise_application_error(-20485, 'Missing vertical units argument. This is required for three dimensional datasets.'); end if;
+        begin 
+          select nvl(cs3d.srid, cs2d.srid) into self.SRID from oracle_srid_xref cs2d 
+            left join oracle_3d_srid_xref cs3d on cs2d.oracle_srid_xref_id = cs3d.oracle_srid_xref_id 
+            where wellknown_coordsys_name = l_prjname and vertical_datum = p_vertical_datum and vertical_units = p_vertical_units;
+        exception when NO_DATA_FOUND then
+          raise_application_error(-20485, 'Coordinate reference system not found for coordinate system name [' ||  l_prjname || '], vertical datum [' || p_vertical_datum || '], and vertical units [' || p_vertical_units || ']');
+        end;
+      else
+        begin
+          select wellknown_srid into self.SRID from oracle_srid_xref where wellknown_coordsys_name = l_prjname and rownum = 1;
+        exception when NO_DATA_FOUND then
+          raise_application_error(-20483, 'Coordinate reference system not found for prj named [' ||  l_prjname || ']');
+        end;
+      end if;
+    else
+      self.SRID := p_srid;
+    end if;
+    return;
+  end;
+
+  member function readPoint(pos in out pls_integer, dim in pls_integer) return sdo_geometry is 
+    l_x number;
+    l_y number;
+    l_z number;
+    l_m number;
+    l_recshapetype pls_integer;
+  begin
+    -- read record header
+    l_recshapetype := Shapefile.readInteger(self.m_shp, pos, utl_raw.little_endian);
+
+    -- read coordinates
+    l_x:= Shapefile.readDouble(self.m_shp, pos, utl_raw.little_endian);
+    l_y:= Shapefile.readDouble(self.m_shp, pos, utl_raw.little_endian);
+    if dim = 3 then
+      pos := pos + 8;
+    elsif dim = 4 then
+      l_z:= Shapefile.readDouble(self.m_shp, pos, utl_raw.little_endian);
+      pos := pos + 8;
+    end if;
+
+    --make geometry
+    return sdo_geometry(self.m_shp_gtype, nvl(self.srid, 0), sdo_point_type(l_x, l_y, l_z),null , null);
+  end;
+
+  member function readPoly(pos in out pls_integer, dim in pls_integer) return sdo_geometry is
+    l_x number;
+    l_y number;
+    l_recshapetype pls_integer;
+    l_nparts number;
+    l_npoints number;
+    l_parts sdo_elem_info_array;
+    l_points sdo_ordinate_array;
+    lastn pls_integer;
+    i pls_integer;
+    j pls_integer;
+    idx pls_integer;
+    n pls_integer;
+    streambuffersize pls_integer := 10;
+    pointbuffer raw(10*16);
+    pointbuffersize pls_integer := 10 * 16;
+    ordbuffer raw(8);
+    ordbuffersize binary_integer := 8;
+  begin
+    -- read record header
+    l_recshapetype := Shapefile.readInteger(self.m_shp, pos, utl_raw.little_endian);
+    pos := pos + 32;  -- skip bounding box
+    l_nparts := Shapefile.readInteger(self.m_shp, pos, utl_raw.little_endian);  
+    if l_nparts <= 0 then
+      raise_application_error(-20899, 'Invalid Shapefile: nparts [' || l_nparts || ']');
+    end if;
+    if l_nparts > 1 and self.m_single_part = 1 then
+      raise_application_error(-20899, 'Invalid Shapefile: force single part is set and nparts = [' || l_nparts || ']');
+    end if;
+    l_npoints := Shapefile.readInteger(self.m_shp, pos, utl_raw.little_endian);   
+
+    -- create the element array based on the record parts. 
+    l_parts := sdo_elem_info_array();
+    l_parts.extend(l_nparts * 3);
+    idx := 1;
+    for i in 1..l_nparts loop
+      l_parts(idx) := 2 * Shapefile.readInteger(self.m_shp, pos, utl_raw.little_endian) + 1;
+      idx := idx + 1;
+      l_parts(idx) := self.m_shp_etype;
+      idx := idx + 1;
+      l_parts(idx) := 1;
+      idx := idx + 1;
+    end loop;
+
+    -- read the coordinates. Use a buffer approach for less and more efficient reads 
+    l_points := sdo_ordinate_array();
+    l_points.extend(l_npoints*dim);       
+    idx := 1;
+    n := floor(l_npoints / streambuffersize);
+    lastn := mod(l_npoints, streambuffersize);
+    for i in 1..n loop
+      dbms_lob.read(self.m_shp,pointbuffersize,pos,pointbuffer);
+      for j in 1..streambuffersize loop 
+        ordbuffer := utl_raw.substr(pointbuffer, 2 * (j-1) * ordbuffersize + 1, ordbuffersize);
+        l_points(idx) := utl_raw.cast_to_binary_double(ordbuffer, UTL_RAW.LITTLE_ENDIAN);
+        idx := idx + 1;
+        pos := pos + 8;
+        l_points(idx)  := utl_raw.cast_to_binary_double(utl_raw.substr(pointbuffer, 2 * (j-1) * ordbuffersize + 1 + ordbuffersize, ordbuffersize), UTL_RAW.LITTLE_ENDIAN);
+        idx := idx + dim - 1;
+        pos := pos + 8;
+      end loop;
+    end loop;
+
+    -- read the rest of the coordinates 
+    for i in 1..lastn loop
+      l_points(idx):= Shapefile.readDouble(self.m_shp, pos, utl_raw.little_endian);
+      idx := idx + 1;
+      l_points(idx) := Shapefile.readDouble(self.m_shp, pos, utl_raw.little_endian);
+      idx := idx + dim - 1;
+    end loop;
+
+    -- read z values and m values if 3 or 4 dimensions. If the value is -Infinity, then use null as the value.
+    if self.m_shp_shapeType = 13 or self.m_shp_shapeType = 15 then
+      idx := 3;
+      pos := pos + 16; -- skip range
+      for i in 1..l_npoints loop
+        l_points(idx) := Shapefile.readDouble(self.m_shp, pos, utl_raw.little_endian);
+        if l_points(idx) <= -99999999999999999999 then l_points(idx) := null; end if;
+        idx := idx + 4;
+      end loop;
+      idx := 4;
+      pos := pos + 16; -- skip range
+      for i in 1..l_npoints loop
+        l_points(idx) := Shapefile.readDouble(self.m_shp, pos, utl_raw.little_endian);
+        if l_points(idx) <= -99999999999999999999 then l_points(idx) := null; end if;
+        idx := idx + 4;
+      end loop;
+    elsif self.m_shp_shapeType = 23 or self.m_shp_shapeType = 25 then
+      idx := 3;
+      pos := pos + 16; -- skip range
+      for i in 1..l_npoints loop
+        l_points(idx) := Shapefile.readDouble(self.m_shp, pos, utl_raw.little_endian);
+        if l_points(idx) <= -99999999999999999999 then l_points(idx) := null; end if;
+        idx := idx + 3;
+      end loop;
+    end if;
+
+    --make geometry
+    return sdo_geometry(self.m_shp_gtype, nvl(self.srid, 0), null, l_parts, l_points);
+  end;
+
+  member function readMultiPoint(pos in out pls_integer, dim in pls_integer) return sdo_geometry is
+    l_x number;
+    l_y number;
+    l_recshapetype pls_integer;
+    l_npoints number;
+    l_parts sdo_elem_info_array;
+    l_points sdo_ordinate_array;
+    i pls_integer;
+    idx pls_integer;
+  begin
+    -- read the record header
+    l_recshapetype := Shapefile.readInteger(self.m_shp, pos, utl_raw.little_endian);
+    pos := pos + 32; --skip bounding box
+    l_npoints := Shapefile.readInteger(self.m_shp, pos, utl_raw.little_endian);
+    if l_npoints <= 0 then
+      raise_application_error(-20899, 'Invalid Shapefile: npoints [' || l_npoints || ']');
+    end if;
+
+    --read the coordinates
+    l_points := sdo_ordinate_array();
+    l_points.extend(l_npoints*dim);
+    idx := 1;
+    for i in 1..l_npoints loop
+      l_x := Shapefile.readDouble(self.m_shp, pos, utl_raw.little_endian);
+      l_points(idx) := l_x;
+      idx := idx + 1;
+      l_y := Shapefile.readDouble(self.m_shp, pos, utl_raw.little_endian);
+      l_points(idx) := l_y;
+      idx := idx + dim - 1;
+    end loop;
+
+    -- create the element array. 
+    l_parts := sdo_elem_info_array();
+    l_parts.extend(1 * 3);
+    l_parts(1) := 1;
+    l_parts(2) := 1;
+    l_parts(3) := l_npoints;
+
+    -- read z values and m values if 3 or 4 dimensions. If the value is -Infinity, then use null as the value.
+    if dim = 4 then
+      idx := 3;
+      pos := pos + 16;
+      for i in 1..l_npoints loop
+        l_points(idx) := Shapefile.readDouble(self.m_shp, pos, utl_raw.little_endian);
+        if l_points(idx) <= -99999999999999999999 then l_points(idx) := null; end if;
+        idx := idx + 4;
+      end loop;
+      idx := 4;
+      pos := pos + 16;
+      for i in 1..l_npoints loop
+        l_points(idx) := Shapefile.readDouble(self.m_shp, pos, utl_raw.little_endian);
+        if l_points(idx) <= -99999999999999999999 then l_points(idx) := null; end if;
+        idx := idx + 4;
+      end loop;
+    elsif dim = 3 then
+      idx := 3;
+      pos := pos + 16;
+      for i in 1..l_npoints loop
+        l_points(idx) := Shapefile.readDouble(self.m_shp, pos, utl_raw.little_endian);
+        if l_points(idx) <= -99999999999999999999 then l_points(idx) := null; end if;
+        idx := idx + 3;
+      end loop;
+    end if;
+
+    --make geometry
+    return sdo_geometry(self.m_shp_gtype, nvl(self.srid, 0), null, l_parts, l_points);
+  end;
+
+  member procedure makePolygonHoles(p_geom in out sdo_geometry, dim in pls_integer) is
+    type swap_t is varray(4) of number;
+    nelements pls_integer;
+    i pls_integer;
+    j pls_integer;
+    pointIndexStart number;
+    pointIndexEnd number;
+    n binary_double;
+    x1 binary_double;
+    y1 binary_double;
+    x2 binary_double;
+    y2 binary_double;
+    reverse_ords sdo_ordinate_array;
+    swap swap_t;
+  begin
+     nelements := p_geom.sdo_elem_info.count / 3;
+     reverse_ords := sdo_ordinate_array();
+     reverse_ords.extend(p_geom.sdo_ordinates.count);
+     for i in 1..nelements loop
+       pointIndexStart := p_geom.sdo_elem_info((i-1) * 3 + 1);
+       if i = nelements then
+         pointIndexEnd := p_geom.sdo_ordinates.count;
+       else
+         pointIndexEnd := p_geom.sdo_elem_info(i * 3 + 1) - 1;
+       end if;
+
+       n := 0.0;
+       j := pointIndexStart;
+       while j < pointIndexEnd - dim loop
+         if j = pointIndexStart then
+           reverse_ords(j) := p_geom.sdo_ordinates(j);
+           reverse_ords(j+1) := p_geom.sdo_ordinates(j+1);
+           if dim >= 3 then
+             reverse_ords(j+2) := p_geom.sdo_ordinates(j+2);
+           end if;
+           if dim >= 4 then
+             reverse_ords(j+3) := p_geom.sdo_ordinates(j+3);
+           end if;
+         else
+           reverse_ords(pointIndexEnd - j + pointIndexStart- 1 - dim + 2) := p_geom.sdo_ordinates(j);
+           reverse_ords(pointIndexEnd - j+1 + pointIndexStart -1 - dim + 2) := p_geom.sdo_ordinates(j+1);
+           if dim >= 3 then
+             reverse_ords(pointIndexEnd - j +2 + pointIndexStart- 1 - dim + 2) := p_geom.sdo_ordinates(j+2);
+           end if;
+           if dim >= 4 then
+             reverse_ords(pointIndexEnd - j + 3 + pointIndexStart- 1 - dim +2) := p_geom.sdo_ordinates(j+3);
+           end if;
+         end if;
+         x1 := p_geom.sdo_ordinates(j);
+         j := j + 1;
+         y1 := p_geom.sdo_ordinates(j);
+         j := j + 1;
+         j := j + dim - 2;
+         x2 := p_geom.sdo_ordinates(j);
+         j := j + 1;
+         y2 := p_geom.sdo_ordinates(j);
+         j := j  + 1;
+         j := j + dim - 2;
+         j := j - dim;
+         n := n + (x2 - x1) * (y2 + y1);
+       end loop;
+       reverse_ords(j) := p_geom.sdo_ordinates(j);
+       reverse_ords(j+1) := p_geom.sdo_ordinates(j+1);
+       if dim >=3 then
+         reverse_ords(j+2) := p_geom.sdo_ordinates(j+2);
+       end if;
+       if dim >= 4 then 
+         reverse_ords(j+3) := p_geom.sdo_ordinates(j+3);
+       end if;
+       if n < 0 then
+         p_geom.sdo_elem_info((i-1) * 3 + 2) := 2003;
+        end if;
+     end loop;
+     p_geom.sdo_ordinates := reverse_ords;
+  end;
+
+  member function GetProgress return integer is
+  begin
+    if self.m_shp_wordsRead < self.m_shp_fileLength - 50 then
+      return floor(100* (self.m_shp_wordsRead / (self.m_shp_fileLength - 50)));
+    else
+      return 100;
+    end if;
+  end;
+
+  member function HasNext return boolean is 
+  begin
+    return self.m_shp_wordsRead < self.m_shp_fileLength - 50;
+  end;
+
+  member procedure MoveNext is
+    l_shp_recordNumber pls_integer;
+    l_shp_contentLength pls_integer;
+    l_shp_pos pls_integer;
+    l_nbytesread pls_integer;
+    j pls_integer;
+    i pls_integer;
+    l_dbf_pos pls_integer;
+    val varchar2(4000);
+  begin
+    if self.m_shp_wordsRead < self.m_shp_fileLength - 50 then
+      -- load shapefile file position pointer.
+      l_shp_pos := self.m_shp_pos;
+
+      --read a record header from the shapefile 
+      l_shp_recordnumber := Shapefile.readInteger(self.m_shp, l_shp_pos, utl_raw.big_endian);
+      l_shp_contentlength := Shapefile.readInteger(self.m_shp, l_shp_pos, utl_raw.big_endian);
+
+      -- based on the shapefile shape type, dispatch the record the appropriate function to create geometry.
+      if self.m_shp_shapetype = 1 then
+        self.Shape := self.readPoint(l_shp_pos, 2);
+      elsif self.m_shp_shapetype = 3 then
+        self.Shape := self.readPoly(l_shp_pos, 2);
+      elsif self.m_shp_shapetype = 5 then
+        self.Shape := self.readPoly(l_shp_pos, 2);    
+        self.makePolygonHoles(self.Shape, 2);
+      elsif self.m_shp_shapetype = 8 then
+        self.Shape := self.readMultiPoint(l_shp_pos, 2);
+      elsif self.m_shp_shapetype = 11 then
+        self.Shape := self.readPoint(l_shp_pos, 4);
+      elsif self.m_shp_shapetype = 13 then
+        self.Shape := self.readPoly(l_shp_pos, 4);
+      elsif self.m_shp_shapetype = 15 then
+        self.Shape := self.readPoly(l_shp_pos, 4);
+        self.makePolygonHoles(self.Shape, 4);
+      elsif self.m_shp_shapetype = 18 then
+        self.Shape := self.readMultiPoint(l_shp_pos, 4);
+      elsif self.m_shp_shapetype = 21 then
+        self.Shape := self.readPoint(l_shp_pos, 3);
+      elsif self.m_shp_shapetype = 23 then
+        self.Shape := self.readPoly(l_shp_pos, 3);
+      elsif self.m_shp_shapetype = 25 then
+        self.Shape := self.readPoly(l_shp_pos, 3);
+        self.makePolygonHoles(self.Shape, 3);
+      elsif self.m_shp_shapetype = 28 then
+        self.Shape := self.readMultiPoint(l_shp_pos, 3);
+      else
+        raise_application_error(-20899, 'Shape type [' || self.m_shp_shapetype || '] not implemented.');
+      end if;
+
+      -- update shapefile record pointers
+      self.m_shp_wordsRead := self.m_shp_wordsRead + l_shp_contentlength + 4;
+
+      -- save shapefile file position pointer.
+      self.m_shp_pos := l_shp_pos;
+
+      -- load dbf file position pointer.
+      l_dbf_pos := self.m_dbf_pos;
+
+      -- read a record from the dbf file and create a javascript-style associate array clob
+      -- of attribute names and values.
+      l_nbytesread := 0;
+      self.Attributes := '{';
+      for i in 1..self.Fields.count loop
+        val := Shapefile.readString(self.m_dbf, l_dbf_pos, self.Fields(i).fieldLength);
+        if i > 1 then
+          self.Attributes := self.Attributes || ', ';
+        end if;
+
+        -- the the field is not numeric, add quotes.
+        if self.Fields(i).fieldType in ('C', 'L', 'D') then
+          self.Attributes := self.Attributes || '"' || self.Fields(i).name ||  '" : "' || replace(regexp_substr(val, '([ -~]*)',1 , 1, null, 1), '"', '\"') || '"';
+        else
+          self.Attributes := self.Attributes || '"' || self.Fields(i).name ||  '" : ' || regexp_substr(val, '([ -~]*)',1 , 1, null, 1);
+        end if;
+        l_nbytesread := l_nbytesread+ self.Fields(i).fieldLength;
+      end loop;
+      self.Attributes := self.Attributes || '}';
+      l_dbf_pos := l_dbf_pos + self.m_dbf_nRecordBytes - l_nbytesread;
+
+      -- save dbf file position pointer.
+      self.m_dbf_pos := l_dbf_pos;
+    else
+      -- cursor is add the end, set Shape and Attributes to null.
+      self.Shape := null;
+      self.Attributes := null;
+    end if;
+  end;
+
+  static function majorVersion return number is
+  begin
+    return 1;
+  end;
+
+  static function minorVersion return number is
+  begin
+    return 0;
+  end;
+
+  static function LastEditedBy return varchar2 is
+  begin
+    return '$Author: b2imimcf $';
+  end;
+
+  static function lastModifiedDate return varchar2 is
+  begin
+    return '$Date: 2022-10-27 23:12:04 -0500 (Thu, 27 Oct 2022) $';
+  end;
+
+  static function revision return varchar2 is
+  begin
+    return '$Revision: 17573 $';
+  end;
+
+end;
