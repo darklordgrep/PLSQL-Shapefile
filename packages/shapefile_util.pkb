@@ -113,13 +113,13 @@ create or replace package body SHAPEFILE_UTIL is
   
   function GenerateJSONQuery(p_shapefilezip in blob, p_srid in integer default null, p_featureclass in varchar2 default null, p_blobname in varchar2) return varchar2 is
     rt varchar2(32767);
-    shapef Shapefile;
+    shapef ShapefileReader;
     i pls_integer;
     ftype varchar2(4000);
   begin
-    shapef := Shapefile(p_shapefilezip, p_srid, p_featureclass);
+    shapef := ShapefileReader(p_shapefilezip, p_srid, p_featureclass);
     rt := 'json_table(' || p_blobname || ', ''$'' COLUMNS(';
-    shapef := shapefile(p_shapefilezip, p_srid, p_featureclass);
+    shapef := ShapefileReader(p_shapefilezip, p_srid, p_featureclass);
     for i in 1..shapef.Fields.count loop
       if i > 1 then
         rt := rt || ', ';
@@ -184,11 +184,11 @@ create or replace package body SHAPEFILE_UTIL is
 
   function lastModifiedDate return varchar2 is
   begin
-    return '$Date: 2022-10-27 23:31:51 -0500 (Thu, 27 Oct 2022) $';
+    return '$Date: 2022-12-07 09:38:34 -0600 (Wed, 07 Dec 2022) $';
   end;
 
   function revision return varchar2 is
   begin
-    return '$Revision: 17575 $';
+    return '$Revision: 17630 $';
   end;
 end;
