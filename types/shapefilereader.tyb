@@ -112,10 +112,10 @@ create or replace type body ShapefileReader is
         raise_application_error(-20481, 'No shapefile components found [.shp, .shx, .dbf]');
       end if;
     end if;
-    if l_shpfile is null then raise_application_error(-20481, 'Missing shapefile component [.shp]'); end if;
-    if l_shxfile is null then raise_application_error(-20481, 'Missing shapefile component [.shx]'); end if;
+    --if l_shpfile is null then raise_application_error(-20481, 'Missing shapefile component [.shp]'); end if;
+    --if l_shxfile is null then raise_application_error(-20481, 'Missing shapefile component [.shx]'); end if;
     if l_dbffile is null then raise_application_error(-20481, 'Missing shapefile component [.dbf]'); end if;
-    if p_srid is null and l_prjfile is null then raise_application_error(-20481,'Missing shapefile component [.prj] and no input SRID provided'); end if;
+    if l_shpfile is not null and p_srid is null and l_prjfile is null then raise_application_error(-20481,'Missing shapefile component [.prj] and no input SRID provided'); end if;
     self.m_dbf := l_dbffile;
     self.m_shp := l_shpfile;
     -- read dbf header
@@ -124,6 +124,7 @@ create or replace type body ShapefileReader is
     self.m_dbf_nRecords := ShapefileReader.readInteger(self.m_dbf, l_dbf_pos, utl_raw.little_endian);
     self.m_dbf_nHeaderBytes := ShapefileReader.readShortInteger(self.m_dbf, l_dbf_pos, utl_raw.little_endian);
     self.m_dbf_nRecordBytes := ShapefileReader.readShortInteger(self.m_dbf, l_dbf_pos, utl_raw.little_endian);
+    self.m_dbf_nTotalBytes := self.m_dbf_nHeaderBytes + self.m_dbf_nRecords * self.m_dbf_nRecordBytes + 2;
     l_dbf_pos := l_dbf_pos + 20;
     self.m_dbf_nFields := floor(self.m_dbf_nHeaderBytes - 33) / 32;
     self.Fields.extend(self.m_dbf_nFields);
@@ -139,6 +140,14 @@ create or replace type body ShapefileReader is
     end loop;
     l_dbf_pos := l_dbf_pos + self.m_dbf_nHeaderBytes - (32* self.m_dbf_nFields + 31);
     self.m_dbf_pos := l_dbf_pos;
+
+    -- if reading a dbase (no geometry) exit constructor)
+    if l_shpfile is null then 
+      self.m_shp_shapetype := 0;
+      self.ShapeType := 'None';
+      return;
+    end if;
+
     -- read shp file header
     l_shp_pos := 1;
     l_shp_filecode := ShapefileReader.readInteger(self.m_shp, l_shp_pos, utl_raw.big_endian);
@@ -268,7 +277,7 @@ create or replace type body ShapefileReader is
       end if;
       self.ShapeType := 'Multipoint';
     end if; 
-    
+
     -- set intial words read and file pointer for reads.
     self.m_shp_wordsRead := 0;    
     self.m_shp_pos := 101;
@@ -300,6 +309,7 @@ create or replace type body ShapefileReader is
     end if;
     return;
   end;
+
   member function readPoint(pos in out pls_integer, dim in pls_integer) return sdo_geometry is 
     l_x number;
     l_y number;
@@ -555,15 +565,24 @@ create or replace type body ShapefileReader is
   end;
   member function GetProgress return integer is
   begin
-    if self.m_shp_wordsRead < self.m_shp_fileLength - 50 then
-      return floor(100* (self.m_shp_wordsRead / (self.m_shp_fileLength - 50)));
+    if self.m_shp_shapetype = 0 then
+      if self.m_dbf_pos < self.m_dbf_nTotalBytes then
+        return floor(100 * (self.m_dbf_pos - self.m_dbf_nHeaderBytes - 2)/ (self.m_dbf_nTotalBytes - self.m_dbf_nHeaderBytes - 2));
+      else
+        return 100;
+      end if;
     else
-      return 100;
+      if self.m_shp_wordsRead < self.m_shp_fileLength - 50 then
+        return floor(100* (self.m_shp_wordsRead / (self.m_shp_fileLength - 50)));
+      else
+        return 100;
+      end if;
     end if;
   end;
   member function HasNext return boolean is 
   begin
-    return self.m_shp_wordsRead < self.m_shp_fileLength - 50;
+    return self.m_dbf_pos < self.m_dbf_nTotalBytes;
+    --return self.m_shp_wordsRead < self.m_shp_fileLength - 50;
   end;
   member procedure MoveNext is
     l_shp_recordNumber pls_integer;
@@ -575,52 +594,66 @@ create or replace type body ShapefileReader is
     l_dbf_pos pls_integer;
     val varchar2(4000);
   begin
-    if self.m_shp_wordsRead < self.m_shp_fileLength - 50 then
-      -- load shapefile file position pointer.
-      l_shp_pos := self.m_shp_pos;
-      --read a record header from the shapefile 
-      l_shp_recordnumber := ShapefileReader.readInteger(self.m_shp, l_shp_pos, utl_raw.big_endian);
-      l_shp_contentlength := ShapefileReader.readInteger(self.m_shp, l_shp_pos, utl_raw.big_endian);
-      -- based on the shapefile shape type, dispatch the record the appropriate function to create geometry.
-      if self.m_shp_shapetype = 1 then
-        self.Shape := self.readPoint(l_shp_pos, 2);
-      elsif self.m_shp_shapetype = 3 then
-        self.Shape := self.readPoly(l_shp_pos, 2);
-      elsif self.m_shp_shapetype = 5 then
-        self.Shape := self.readPoly(l_shp_pos, 2);    
-        self.makePolygonHoles(self.Shape, 2);
-      elsif self.m_shp_shapetype = 8 then
-        self.Shape := self.readMultiPoint(l_shp_pos, 2);
-      elsif self.m_shp_shapetype = 11 then
-        self.Shape := self.readPoint(l_shp_pos, 4);
-      elsif self.m_shp_shapetype = 13 then
-        self.Shape := self.readPoly(l_shp_pos, 4);
-      elsif self.m_shp_shapetype = 15 then
-        self.Shape := self.readPoly(l_shp_pos, 4);
-        self.makePolygonHoles(self.Shape, 4);
-      elsif self.m_shp_shapetype = 18 then
-        self.Shape := self.readMultiPoint(l_shp_pos, 4);
-      elsif self.m_shp_shapetype = 21 then
-        self.Shape := self.readPoint(l_shp_pos, 3);
-      elsif self.m_shp_shapetype = 23 then
-        self.Shape := self.readPoly(l_shp_pos, 3);
-      elsif self.m_shp_shapetype = 25 then
-        self.Shape := self.readPoly(l_shp_pos, 3);
-        self.makePolygonHoles(self.Shape, 3);
-      elsif self.m_shp_shapetype = 28 then
-        self.Shape := self.readMultiPoint(l_shp_pos, 3);
-      else
-        raise_application_error(-20899, 'Shape type [' || self.m_shp_shapetype || '] not implemented.');
+   -- Geometry. Skip this if there is no geometry.
+    if not self.m_shp_shapetype = 0 then
+      if self.m_shp_wordsRead < self.m_shp_fileLength - 50 then
+        -- load shapefile file position pointer.
+        l_shp_pos := self.m_shp_pos;
+        --read a record header from the shapefile 
+        l_shp_recordnumber := ShapefileReader.readInteger(self.m_shp, l_shp_pos, utl_raw.big_endian);
+        l_shp_contentlength := ShapefileReader.readInteger(self.m_shp, l_shp_pos, utl_raw.big_endian);
+        -- based on the shapefile shape type, dispatch the record the appropriate function to create geometry.
+        if self.m_shp_shapetype = 1 then
+          self.Shape := self.readPoint(l_shp_pos, 2);
+        elsif self.m_shp_shapetype = 3 then
+          self.Shape := self.readPoly(l_shp_pos, 2);
+        elsif self.m_shp_shapetype = 5 then
+          self.Shape := self.readPoly(l_shp_pos, 2);    
+          self.makePolygonHoles(self.Shape, 2);
+        elsif self.m_shp_shapetype = 8 then
+          self.Shape := self.readMultiPoint(l_shp_pos, 2);
+        elsif self.m_shp_shapetype = 11 then
+          self.Shape := self.readPoint(l_shp_pos, 4);
+        elsif self.m_shp_shapetype = 13 then
+          self.Shape := self.readPoly(l_shp_pos, 4);
+        elsif self.m_shp_shapetype = 15 then
+          self.Shape := self.readPoly(l_shp_pos, 4);
+          self.makePolygonHoles(self.Shape, 4);
+        elsif self.m_shp_shapetype = 18 then
+          self.Shape := self.readMultiPoint(l_shp_pos, 4);
+        elsif self.m_shp_shapetype = 21 then
+          self.Shape := self.readPoint(l_shp_pos, 3);
+        elsif self.m_shp_shapetype = 23 then
+          self.Shape := self.readPoly(l_shp_pos, 3);
+        elsif self.m_shp_shapetype = 25 then
+          self.Shape := self.readPoly(l_shp_pos, 3);
+          self.makePolygonHoles(self.Shape, 3);
+        elsif self.m_shp_shapetype = 28 then
+          self.Shape := self.readMultiPoint(l_shp_pos, 3);
+        else
+          raise_application_error(-20899, 'Shape type [' || self.m_shp_shapetype || '] not implemented.');
+        end if;
+        -- update shapefile record pointers
+        self.m_shp_wordsRead := self.m_shp_wordsRead + l_shp_contentlength + 4;
+        -- save shapefile file position pointer
+        self.m_shp_pos := l_shp_pos;
+      else 
+        -- End of cursor, set shape to null
+        self.Shape := null;
       end if;
-      -- update shapefile record pointers
-      self.m_shp_wordsRead := self.m_shp_wordsRead + l_shp_contentlength + 4;
-      -- save shapefile file position pointer.
-      self.m_shp_pos := l_shp_pos;
+    else
+      -- No geometry in input dataset, set shape to null
+      self.Shape := null;
+    end if;
+
+    -- Attributes
+    if self.m_dbf_pos < self.m_dbf_nTotalBytes then
       -- load dbf file position pointer.
       l_dbf_pos := self.m_dbf_pos;
       -- read a record from the dbf file and create a javascript-style associate array clob
       -- of attribute names and values.
       l_nbytesread := 0;
+
       self.Attributes := '{';
       for i in 1..self.Fields.count loop
         val := ShapefileReader.readString(self.m_dbf, l_dbf_pos, self.Fields(i).fieldLength);
@@ -640,8 +673,7 @@ create or replace type body ShapefileReader is
       -- save dbf file position pointer.
       self.m_dbf_pos := l_dbf_pos;
     else
-      -- cursor is add the end, set Shape and Attributes to null.
-      self.Shape := null;
+      -- cursor is at the end, set Attributes to null.
       self.Attributes := null;
     end if;
   end;
@@ -651,7 +683,7 @@ create or replace type body ShapefileReader is
   end;
   static function minorVersion return number is
   begin
-    return 0;
+    return 1;
   end;
   static function LastEditedBy return varchar2 is
   begin
@@ -659,10 +691,10 @@ create or replace type body ShapefileReader is
   end;
   static function lastModifiedDate return varchar2 is
   begin
-    return '$Date: 2022-12-07 09:38:34 -0600 (Wed, 07 Dec 2022) $';
+    return '$Date: 2023-05-19 10:38:43 -0500 (Fri, 19 May 2023) $';
   end;
   static function revision return varchar2 is
   begin
-    return '$Revision: 17630 $';
+    return '$Revision: 18187 $';
   end;
 end;

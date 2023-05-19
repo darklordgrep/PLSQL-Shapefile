@@ -2,17 +2,20 @@ create or replace package SHAPEFILE_UTIL is
   --------------------------------------------------------------------------------
   -- Module   : $HeadURL: svn://gis.mvn.usace.army.mil/sandp/DatabaseScripts/ShapefileComponent/trunk/packages/shapefile_util.pks $
   -- Author   : grep
-  -- Date     : $Date: 2022-10-28 09:47:09 -0500 (Fri, 28 Oct 2022) $
-  -- Revision : $Revision: 17581 $
-  -- Requires : Types shapefile_reader, shapefile_writer, shapefile_t, and shapefile_tab
+  -- Date     : $Date: 2023-05-19 10:38:43 -0500 (Fri, 19 May 2023) $
+  -- Revision : $Revision: 18187 $
+  -- Requires : Types shapefile, shapefile_t, and shapefile_tab
   -- Usage    : Functions to access data from shapefiles. Whereas
   --            the Shapefile type is used in plsql to iterate over 
   --            the features in a shapefile. The ShapefileTable functions
   --            can be used directly in sql.
+  -- Notes    : Version 1.1 - Added support for reading dbase (dbf files with no
+  --            associated shp file). These are treated as shapefiles with
+  --            no geometry.
   --------------------------------------------------------------------------------
   
   m_majorVersion constant number := 1;
-  m_minorVersion constant number := 0;
+  m_minorVersion constant number := 1;
   
   -- Return a string of all featureclasses in the input shapefile zip, p_shapefilezip.
   -- A featureclass is .shp file without the .shp extension. If the .shp file is

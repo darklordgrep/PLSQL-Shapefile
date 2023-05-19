@@ -1,20 +1,17 @@
 create or replace PACKAGE BODY SHAPEFILE_TESTING AS 
-
   procedure setUp is
   begin
     select file_content into shapefile_testing.testdata from apex_application_static_files where file_name like 'shapefile_util_testdata.zip';
   exception when no_data_found then
     raise_application_error(-20198, 'shapefile_util_testdata.zip not found in apex_application_static_files. This can be remedied by installing the Shapefile Demo apex application.');
   end;
-  
+
   procedure testEmptyShapefile is
     shapef ShapefileReader;
-
   begin
     shapef := ShapefileReader(p_shapefilezip => testdata, p_featureclass => 'empty', p_srid => 8265);
     ut.expect(shapef.ShapeType).to_equal('Point');
     ut.expect(shapef.GetProgress).to_equal(100);
-
     ut.expect(shapef.hasnext).to_equal(FALSE);
     ut.expect(sdo_util.to_geojson(shapef.shape)).to_be_null();
     ut.expect(shapef.attributes).to_be_null();
@@ -23,7 +20,7 @@ create or replace PACKAGE BODY SHAPEFILE_TESTING AS
     ut.expect(sdo_util.to_geojson(shapef.shape)).to_be_null();
     ut.expect(shapef.attributes).to_be_null();
   end;
-  
+
   procedure testPointShapefileReader is
     shapef ShapefileReader;
     geom sdo_geometry;
@@ -38,7 +35,7 @@ create or replace PACKAGE BODY SHAPEFILE_TESTING AS
     i := 1;
     while shapef.hasnext loop
       shapef.movenext;
-      
+
       geom := shapef.shape;
       attributes := json_object_t(shapef.attributes);
       if i = 1 then
@@ -69,7 +66,7 @@ create or replace PACKAGE BODY SHAPEFILE_TESTING AS
     end loop;
     ut.expect(shapef.GetProgress).to_equal(100);
   end;
-  
+
   procedure testLineShapefileReader is
     shapef ShapefileReader;
     geom sdo_geometry;
@@ -84,7 +81,7 @@ create or replace PACKAGE BODY SHAPEFILE_TESTING AS
     i := 1;
     while shapef.hasnext loop
       shapef.movenext;
-      
+
       geom := shapef.shape;
       attributes := json_object_t(shapef.attributes);
       if i = 1 then
@@ -127,7 +124,7 @@ create or replace PACKAGE BODY SHAPEFILE_TESTING AS
     end loop;
     ut.expect(shapef.GetProgress).to_equal(100);
   end;
-  
+
   procedure testPolygonShapefileReader is
     shapef ShapefileReader;
     geom sdo_geometry;
@@ -142,7 +139,7 @@ create or replace PACKAGE BODY SHAPEFILE_TESTING AS
     i := 1;
     while shapef.hasnext loop
       shapef.movenext;
-      
+
       geom := shapef.shape;
       attributes := json_object_t(shapef.attributes);
       if i = 1 then
@@ -177,12 +174,12 @@ create or replace PACKAGE BODY SHAPEFILE_TESTING AS
         ut.expect(shapef.shape.sdo_elem_info.count).to_equal(2 * 3);
         ut.expect(sdo_util.getnumelem(shapef.shape)).to_equal(1);
         ut.expect(sdo_util.getnumvertices(shapef.shape)).to_equal(9);
-        
+
         --hole
         ut.expect(sdo_util.getfirstvertex(sdo_util.extract(shapef.shape, 1, 2)).x).to_be_between(-92.268 - 0.001, -92.268 + .001); 
         ut.expect(sdo_util.getfirstvertex(sdo_util.extract(shapef.shape, 1, 2)).y).to_be_between(30.666 - 0.001, 30.666 + .001); 
         ut.expect(sdo_util.getnumvertices(sdo_util.extract(shapef.shape, 1, 2))).to_equal(4);
-        
+
         ut.expect(attributes.get_number('Id')).to_equal(3);
         ut.expect(attributes.get_string('Name')).to_equal('third polygon');
       elsif i > 3 then
@@ -192,7 +189,7 @@ create or replace PACKAGE BODY SHAPEFILE_TESTING AS
     end loop;
     ut.expect(shapef.GetProgress).to_equal(100);
   end;
-  
+
   procedure testMultiPointShapefileReader is
     shapef ShapefileReader;
     geom sdo_geometry;
@@ -207,7 +204,7 @@ create or replace PACKAGE BODY SHAPEFILE_TESTING AS
     i := 1;
     while shapef.hasnext loop
       shapef.movenext;
-      
+
       geom := shapef.shape;
       attributes := json_object_t(shapef.attributes);
       if i = 1 then
@@ -239,7 +236,7 @@ create or replace PACKAGE BODY SHAPEFILE_TESTING AS
     end loop;
     ut.expect(shapef.GetProgress).to_equal(100);
   end;
-  
+
   procedure testPointZShapefileReader is
     shapef ShapefileReader;
     geom sdo_geometry;
@@ -254,7 +251,7 @@ create or replace PACKAGE BODY SHAPEFILE_TESTING AS
     i := 1;
     while shapef.hasnext loop
       shapef.movenext;
-      
+
       geom := shapef.shape;
       attributes := json_object_t(shapef.attributes);
       if i = 1 then
@@ -281,7 +278,7 @@ create or replace PACKAGE BODY SHAPEFILE_TESTING AS
     end loop;
     ut.expect(shapef.GetProgress).to_equal(100);
   end;
-  
+
   procedure testLineZShapefileReader is
     shapef ShapefileReader;
     geom sdo_geometry;
@@ -296,7 +293,7 @@ create or replace PACKAGE BODY SHAPEFILE_TESTING AS
     i := 1;
     while shapef.hasnext loop
       shapef.movenext;
-      
+
       geom := shapef.shape;
       attributes := json_object_t(shapef.attributes);
       if i = 1 then
@@ -306,11 +303,11 @@ create or replace PACKAGE BODY SHAPEFILE_TESTING AS
         ut.expect(sdo_util.getfirstvertex(shapef.shape).x).to_be_between(-90.145 - 0.001, -90.145 + 0.001); 
         ut.expect(sdo_util.getfirstvertex(shapef.shape).y).to_be_between(30.957 - 0.001, 30.957 + 0.001);
         ut.expect(sdo_util.getfirstvertex(shapef.shape).z).to_equal(5.0);
-        
+
         ut.expect(sdo_util.getlastvertex(shapef.shape).x).to_be_between(-90.635 - 0.001, -90.635 + 0.001); 
         ut.expect(sdo_util.getlastvertex(shapef.shape).y).to_be_between(30.729 - 0.001, 30.729 + 0.001);
         ut.expect(sdo_util.getlastvertex(shapef.shape).z).to_equal(-1.0);
-        
+
         ut.expect(sdo_util.getnumvertices(shapef.shape)).to_equal(7);
         ut.expect(attributes.get_number('Id')).to_equal(1);
         ut.expect(attributes.get_string('Name')).to_equal('first mz line');
@@ -322,12 +319,12 @@ create or replace PACKAGE BODY SHAPEFILE_TESTING AS
         ut.expect(sdo_util.getfirstvertex(shapef.shape).y).to_be_between(30.408 - 0.001, 30.408 + 0.001);
         ut.expect(sdo_util.getfirstvertex(shapef.shape).z).to_equal(1.0);
         ut.expect(sdo_util.getfirstvertex(shapef.shape).w).to_equal(4.0);
-        
+
         ut.expect(sdo_util.getlastvertex(shapef.shape).x).to_be_between(-90.014 - 0.001, -90.014 + 0.001); 
         ut.expect(sdo_util.getlastvertex(shapef.shape).y).to_be_between(30.287 - 0.001, 30.287 + 0.001);
         ut.expect(sdo_util.getlastvertex(shapef.shape).z).to_equal(3.0);
         ut.expect(sdo_util.getlastvertex(shapef.shape).w).to_be_between(6.6- 0.00001, 6.6 + 0.00001);
-        
+
         ut.expect(sdo_util.getnumvertices(shapef.shape)).to_equal(3);
         ut.expect(attributes.get_number('Id')).to_equal(2);
         ut.expect(attributes.get_string('Name')).to_equal('second mz line');
@@ -338,7 +335,7 @@ create or replace PACKAGE BODY SHAPEFILE_TESTING AS
     end loop;
     ut.expect(shapef.GetProgress).to_equal(100);
   end;
-  
+
   procedure testPolygonZShapefileReader is
     shapef ShapefileReader;
     geom sdo_geometry;
@@ -353,7 +350,7 @@ create or replace PACKAGE BODY SHAPEFILE_TESTING AS
     i := 1;
     while shapef.hasnext loop
       shapef.movenext;
-      
+
       geom := shapef.shape;
       attributes := json_object_t(shapef.attributes);
       if i = 1 then
@@ -369,16 +366,16 @@ create or replace PACKAGE BODY SHAPEFILE_TESTING AS
         ut.expect(sdo_util.getvertices(shapef.shape)(2).x).to_be_between(-93.910 - 0.001, -93.910 + .001); 
         ut.expect(sdo_util.getvertices(shapef.shape)(2).y).to_be_between(28.897 - 0.001, 28.897 + 0.001); 
         ut.expect(sdo_util.getvertices(shapef.shape)(2).z).to_equal(1.0); 
-        
+
         ut.expect(sdo_util.getlastvertex(shapef.shape).x).to_be_between(-93.808 - 0.001, -93.808 + .001); 
         ut.expect(sdo_util.getlastvertex(shapef.shape).y).to_be_between(29.359 - 0.001, 29.359 + 0.001);
         ut.expect(sdo_util.getlastvertex(shapef.shape).z).to_equal(66.0);
-        
+
         ut.expect(sdo_util.getnumelem(shapef.shape)).to_equal(1);
         ut.expect(sdo_util.getnumvertices(shapef.shape)).to_equal(6);
         ut.expect(attributes.get_number('Id')).to_equal(1);
         ut.expect(attributes.get_string('Name')).to_equal('first mz polygon');
-      
+
       elsif i > 1 then
         ut.fail('Extra features found');
       end if;
@@ -386,7 +383,7 @@ create or replace PACKAGE BODY SHAPEFILE_TESTING AS
     end loop;
     ut.expect(shapef.GetProgress).to_equal(100);
   end;
-  
+
   procedure testMultiPointZShapefileReader is
     shapef ShapefileReader;
     geom sdo_geometry;
@@ -401,7 +398,7 @@ create or replace PACKAGE BODY SHAPEFILE_TESTING AS
     i := 1;
     while shapef.hasnext loop
       shapef.movenext;
-      
+
       geom := shapef.shape;
       attributes := json_object_t(shapef.attributes);
       if i = 1 then
@@ -426,7 +423,7 @@ create or replace PACKAGE BODY SHAPEFILE_TESTING AS
     end loop;
     ut.expect(shapef.GetProgress).to_equal(100);
   end;
-  
+
   procedure testPointMShapefileReader is
    shapef ShapefileReader;
     geom sdo_geometry;
@@ -441,7 +438,7 @@ create or replace PACKAGE BODY SHAPEFILE_TESTING AS
     i := 1;
     while shapef.hasnext loop
       shapef.movenext;
-      
+
       geom := shapef.shape;
       attributes := json_object_t(shapef.attributes);
       if i = 1 then
@@ -477,7 +474,7 @@ create or replace PACKAGE BODY SHAPEFILE_TESTING AS
     end loop;
     ut.expect(shapef.GetProgress).to_equal(100);
   end;
-  
+
   procedure testLineMShapefileReader is
   shapef ShapefileReader;
     geom sdo_geometry;
@@ -492,7 +489,7 @@ create or replace PACKAGE BODY SHAPEFILE_TESTING AS
     i := 1;
     while shapef.hasnext loop
       shapef.movenext;
-      
+
       geom := shapef.shape;
       attributes := json_object_t(shapef.attributes);
       if i = 1 then
@@ -500,15 +497,14 @@ create or replace PACKAGE BODY SHAPEFILE_TESTING AS
         --wkt := sdo_util.to_wktgeometry(shapef.shape);
         --js := sdo_util.to_geojson(shapef.shape);
 
-        
         ut.expect(sdo_util.getfirstvertex(shapef.shape).x).to_be_between(-92.943 - 0.001, -92.943 + 0.001); 
         ut.expect(sdo_util.getfirstvertex(shapef.shape).y).to_be_between(30.826 - 0.001, 30.826 + 0.001);
         ut.expect(sdo_util.getfirstvertex(shapef.shape).z).to_be_null();
-        
+
         ut.expect(sdo_util.getlastvertex(shapef.shape).x).to_be_between(-92.011 - 0.001, -92.011 + 0.001); 
         ut.expect(sdo_util.getlastvertex(shapef.shape).y).to_be_between(29.820 - 0.001, 29.820 + 0.001);
         ut.expect(sdo_util.getlastvertex(shapef.shape).z).to_be_null();
-        
+
         ut.expect(attributes.get_number('Id')).to_equal(1);
         ut.expect(attributes.get_string('Name')).to_equal('first m line');
       elsif i = 2 then
@@ -518,11 +514,11 @@ create or replace PACKAGE BODY SHAPEFILE_TESTING AS
         ut.expect(sdo_util.getfirstvertex(shapef.shape).x).to_be_between(-92.783 - 0.001, -92.783 + 0.001); 
         ut.expect(sdo_util.getfirstvertex(shapef.shape).y).to_be_between(30.870 - 0.001, 30.870 + 0.001);
         ut.expect(sdo_util.getfirstvertex(shapef.shape).z).to_equal(0.0);
-        
+
         ut.expect(sdo_util.getlastvertex(shapef.shape).x).to_be_between(-92.040 - 0.001, -92.040 + 0.001); 
         ut.expect(sdo_util.getlastvertex(shapef.shape).y).to_be_between(30.034 - 0.001, 30.034 + 0.001);
         ut.expect(sdo_util.getlastvertex(shapef.shape).z).to_equal(3.0);
-        
+
         ut.expect(attributes.get_number('Id')).to_equal(2);
         ut.expect(attributes.get_string('Name')).to_equal('second line m');
       elsif i > 3 then
@@ -532,7 +528,7 @@ create or replace PACKAGE BODY SHAPEFILE_TESTING AS
     end loop;
     ut.expect(shapef.GetProgress).to_equal(100);
   end;
-  
+
   procedure testPolygonMShapefileReader is
   shapef ShapefileReader;
     geom sdo_geometry;
@@ -547,7 +543,7 @@ create or replace PACKAGE BODY SHAPEFILE_TESTING AS
     i := 1;
     while shapef.hasnext loop
       shapef.movenext;
-      
+
       geom := shapef.shape;
       attributes := json_object_t(shapef.attributes);
       if i = 1 then
@@ -557,24 +553,24 @@ create or replace PACKAGE BODY SHAPEFILE_TESTING AS
         ut.expect(sdo_util.getfirstvertex(shapef.shape).x).to_be_between(-89.911 - 0.001, -89.911 + .001); 
         ut.expect(sdo_util.getfirstvertex(shapef.shape).y).to_be_between(28.377 - 0.001, 28.377 + 0.001);
         ut.expect(sdo_util.getfirstvertex(shapef.shape).z).to_equal(.0);
-         
-        
-        
-        
+
+
+
+
         ut.expect(sdo_util.getvertices(shapef.shape)(sdo_util.getnumvertices(shapef.shape)-1).x).to_be_between(-89.484- 0.001, -89.484 + .001); 
         ut.expect(sdo_util.getvertices(shapef.shape)(sdo_util.getnumvertices(shapef.shape)-1).y).to_be_between(28.577 - 0.001, 28.577 + .001); 
         ut.expect(sdo_util.getvertices(shapef.shape)(sdo_util.getnumvertices(shapef.shape)-1).z).to_equal(2.0);
-        
-        
+
+
         ut.expect(sdo_util.getlastvertex(shapef.shape).x).to_be_between(-89.911 - 0.001, -89.911 + .001); 
         ut.expect(sdo_util.getlastvertex(shapef.shape).y).to_be_between(28.377 - 0.001, 28.377 + 0.001);
         ut.expect(sdo_util.getlastvertex(shapef.shape).z).to_equal(0);
-        
+
         ut.expect(sdo_util.getnumelem(shapef.shape)).to_equal(1);
         ut.expect(sdo_util.getnumvertices(shapef.shape)).to_equal(6);
         ut.expect(attributes.get_number('Id')).to_equal(0);
         ut.expect(attributes.get_string('Name')).to_equal('first m polygon');
-      
+
       elsif i > 1 then
         ut.fail('Extra features found');
       end if;
@@ -582,7 +578,7 @@ create or replace PACKAGE BODY SHAPEFILE_TESTING AS
     end loop;
     ut.expect(shapef.GetProgress).to_equal(100);
   end;
-  
+
   procedure testMultiPointMShapefileReader is
     shapef ShapefileReader;
     geom sdo_geometry;
@@ -597,7 +593,7 @@ create or replace PACKAGE BODY SHAPEFILE_TESTING AS
     i := 1;
     while shapef.hasnext loop
       shapef.movenext;
-      
+
       geom := shapef.shape;
       attributes := json_object_t(shapef.attributes);
       if i = 1 then
@@ -606,12 +602,12 @@ create or replace PACKAGE BODY SHAPEFILE_TESTING AS
         js := sdo_util.to_geojson(sdo_lrs.convert_to_std_geom(shapef.shape));
         ut.expect(sdo_util.getfirstvertex(shapef.shape).x).to_be_between(-92.020 - 0.001, -92.020 + 0.001); 
         ut.expect(sdo_util.getfirstvertex(shapef.shape).y).to_be_between(29.398 - 0.001, 29.398 + 0.001);
-        
+
         ut.expect(sdo_util.getfirstvertex(shapef.shape).z).to_equal(0.0);
         ut.expect(sdo_util.getlastvertex(shapef.shape).x).to_be_between(-91.792 - 0.001, -91.792 + 0.001); 
         ut.expect(sdo_util.getlastvertex(shapef.shape).y).to_be_between(29.160 - 0.001, 29.160 + 0.001);
         ut.expect(sdo_util.getlastvertex(shapef.shape).z).to_equal(9.0);
-        
+
         ut.expect(sdo_util.getnumvertices(shapef.shape)).to_equal(4);
         ut.expect(attributes.get_number('Id')).to_equal(0);
         ut.expect(attributes.get_string('Name')).to_equal('first m multipoint');
@@ -637,7 +633,7 @@ create or replace PACKAGE BODY SHAPEFILE_TESTING AS
     end loop;
     ut.expect(shapef.GetProgress).to_equal(100);
   end;
-  
+
   procedure testNullShapefileReader is 
     shapef ShapefileReader;
   begin
@@ -650,7 +646,7 @@ create or replace PACKAGE BODY SHAPEFILE_TESTING AS
       raise;
     end if;
   end;
-  
+
   procedure testNonexistentShapefile is
     shapef ShapefileReader;
   begin
@@ -664,7 +660,7 @@ create or replace PACKAGE BODY SHAPEFILE_TESTING AS
       raise;
     end if;
   end;
-  
+
   procedure testInvalidShapefile is
     shapef ShapefileReader;
   begin
@@ -678,7 +674,7 @@ create or replace PACKAGE BODY SHAPEFILE_TESTING AS
       raise;
     end if;
   end;
-  
+
   procedure testMissingShapefileComponent is
     shapef ShapefileReader;
   begin
@@ -692,7 +688,6 @@ create or replace PACKAGE BODY SHAPEFILE_TESTING AS
       raise;
     end if;
   end;
-
   procedure testPointShapefileWriter is
     shapew ShapefileWriter;
     shapef ShapefileReader;
@@ -726,7 +721,7 @@ create or replace PACKAGE BODY SHAPEFILE_TESTING AS
     ut.expect(sdo_util.getfirstvertex(shapef.shape).x).to_equal(-91.5);
     ut.expect(sdo_util.getfirstvertex(shapef.shape).y).to_equal(33.5);
   end;
-  
+
 procedure testLineShapefileWriter is
     shapew ShapefileWriter;
     shapef ShapefileReader;
@@ -756,5 +751,41 @@ procedure testLineShapefileWriter is
     --ut.expect(sdo_util.getfirstvertex(shapef.shape).x).to_equal(-92);
     --ut.expect(sdo_util.getfirstvertex(shapef.shape).y).to_equal(34);
   end;
-  
+
+  procedure testTableReader is
+    shapef ShapefileReader;
+    geom sdo_geometry;
+    attributes json_object_t;
+    i pls_integer;
+    wkt clob;
+    js clob;
+  begin
+    shapef := ShapefileReader(p_shapefilezip => testdata, p_featureclass => 'table');
+    ut.expect(shapef.ShapeType).to_equal('None');
+    ut.expect(shapef.GetProgress).to_equal(0);
+    i := 1;
+    while shapef.hasnext loop
+      shapef.movenext;
+      geom := shapef.shape;
+      attributes := json_object_t(shapef.attributes);
+      if i = 1 then
+        ut.expect(sdo_util.to_wktgeometry(geom)).to_be_null();
+        ut.expect(attributes.get_number('Id')).to_equal(1);
+        ut.expect(attributes.get_string('Name')).to_equal('point 1');     
+      elsif i = 2 then
+        ut.expect(sdo_util.to_wktgeometry(geom)).to_be_null();
+        ut.expect(attributes.get_number('Id')).to_equal(2);
+        ut.expect(attributes.get_string('Name')).to_equal('point 2');
+      elsif i = 3 then
+        ut.expect(sdo_util.to_wktgeometry(geom)).to_be_null();
+        ut.expect(attributes.get_number('Id')).to_equal(3);
+        ut.expect(attributes.get_string('Name')).to_equal('point3');
+      elsif i > 3 then
+        ut.fail('Extra features found');
+      end if;
+      i := i + 1;
+    end loop;
+    ut.expect(shapef.GetProgress).to_equal(100);
+  end;
+
 END SHAPEFILE_TESTING;

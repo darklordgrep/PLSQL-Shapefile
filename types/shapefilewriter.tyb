@@ -493,7 +493,7 @@ create or replace type body ShapefileWriter is
 
   static function minorVersion return number is
   begin
-    return 0;
+    return 1;
   end;
 
   static function LastEditedBy return varchar2 is
@@ -503,11 +503,11 @@ create or replace type body ShapefileWriter is
 
   static function lastModifiedDate return varchar2 is
   begin
-    return '$Date: 2022-10-27 23:34:47 -0500 (Thu, 27 Oct 2022) $';
+    return '$Date: 2023-05-19 10:38:43 -0500 (Fri, 19 May 2023) $';
   end;
 
   static function revision return varchar2 is
   begin
-    return '$Revision: 17576 $';
+    return '$Revision: 18187 $';
   end;
 end;

@@ -62,4 +62,7 @@ create or replace PACKAGE SHAPEFILE_TESTING AS
   --%test(Write line shapefile)
   procedure testLineShapefileWriter;
   
+  --%test(Read dbf table)
+  procedure testTableReader;
+  
 END SHAPEFILE_TESTING;
