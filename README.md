@@ -1,6 +1,6 @@
 # ![Logo](https://raw.githubusercontent.com/darklordgrep/PLSQL-Shapefile/main/shapfile_logo.png) PLSQL Shapefile 
 ~~~
-Version 1.0 $Revision: 17631 $ $Date: 2022-12-07 09:53:05 -0500 (Wed, 7 Dec 2022) $
+Version 1.0 $Revision: 18191 $ $Date: 2023-05-19 11:24:35 -0500 (Fri, 19 May 2023) $
 ~~~
 
 ## Overview
@@ -26,3 +26,7 @@ See shapefile_reader.typ, shapefile_write.typ, and shapefile_util.pks for usage 
 
 ## Testing
 The [utPLSQL](https://github.com/utPLSQL/utPLSQL) library is required for testing. To test PL/SQL Shapefile, install the APEX application, shapefile_demo_application.sql. It includes the same test data in the file, shapefile_util_testdata.zip. There is a Testing tab for running unit tests.
+
+## History
+- **Version 1.0** Initial Release.
+- **Version 1.1** Added support for reading dbase (shapefiles without .shp files).
