@@ -1,6 +1,6 @@
 # ![Logo](https://raw.githubusercontent.com/darklordgrep/PLSQL-Shapefile/main/shapfile_logo.png) PLSQL Shapefile 
 ~~~
-Version 1.0 $Revision: 18191 $ $Date: 2023-05-19 11:24:35 -0500 (Fri, 19 May 2023) $
+Version 1.1 $Revision: 18552 $ $Date: 2023-10-02 12:04:09 -0500 (Mon, 02 Oct 2023)) $
 ~~~
 
 ## Overview
@@ -29,4 +29,4 @@ The [utPLSQL](https://github.com/utPLSQL/utPLSQL) library is required for testin
 
 ## History
 - **Version 1.0** Initial Release.
-- **Version 1.1** Added support for reading dbase (shapefiles without .shp files).
+- **Version 1.1** Added support for reading and writing dbase (shapefiles without .shp files). 
