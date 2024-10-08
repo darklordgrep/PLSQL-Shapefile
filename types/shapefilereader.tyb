@@ -87,6 +87,7 @@ create or replace type body ShapefileReader is
           raise_application_error(-20480, 'Duplicate shapefile component [' || l_files(i) || ']. If zip contains multiple shapefiles, specify a feature class.');
         end if;
         l_shxfile := apex_zip.get_file_content(p_zipped_blob => p_shapefileZip, p_file_name => l_files(i));
+        self.Count := (dbms_lob.getlength(l_shxfile) - 100) / 8;
       elsif regexp_instr(lower(l_files(i)), l_featureclass || '\.dbf$') > 0  and (p_featureclass = substr(l_files(i),1,length(l_files(i))-4) or p_featureclass is null) then
         if (not l_dbffile is null) then
           raise_application_error(-20480, 'Duplicate shapefile component [' || l_files(i) || ']. If zip contains multiple shapefiles, specify a feature class.');
@@ -118,6 +119,7 @@ create or replace type body ShapefileReader is
     if l_shpfile is not null and p_srid is null and l_prjfile is null then raise_application_error(-20481,'Missing shapefile component [.prj] and no input SRID provided'); end if;
     self.m_dbf := l_dbffile;
     self.m_shp := l_shpfile;
+    self.m_shx := l_shxfile;
     -- read dbf header
     self.Fields := ShapefileDBFFieldList();
     l_dbf_pos := 5;
@@ -352,8 +354,10 @@ create or replace type body ShapefileReader is
   begin
     -- read record header
     l_recshapetype := ShapefileReader.readInteger(self.m_shp, pos, utl_raw.little_endian);
+    dbms_output.put_line('type ' || l_recshapetype);
     pos := pos + 32;  -- skip bounding box
     l_nparts := ShapefileReader.readInteger(self.m_shp, pos, utl_raw.little_endian);  
+    dbms_output.put_line('nparts ' || l_nparts);
     if l_nparts <= 0 then
       raise_application_error(-20899, 'Invalid Shapefile: nparts [' || l_nparts || ']');
     end if;
@@ -361,6 +365,8 @@ create or replace type body ShapefileReader is
       raise_application_error(-20899, 'Invalid Shapefile: force single part is set and nparts = [' || l_nparts || ']');
     end if;
     l_npoints := ShapefileReader.readInteger(self.m_shp, pos, utl_raw.little_endian);   
+    dbms_output.put_line('npoints ' || l_npoints);
+    
     -- create the element array based on the record parts. 
     l_parts := sdo_elem_info_array();
     l_parts.extend(l_nparts * 3);
@@ -372,6 +378,7 @@ create or replace type body ShapefileReader is
       idx := idx + 1;
       l_parts(idx) := 1;
       idx := idx + 1;
+      dbms_output.put_line('parts ' || l_parts(idx - 3)  || ' ' || l_parts(idx - 2) || ' ' || l_parts(idx - 1 ));
     end loop;
     -- read the coordinates. Use a buffer approach for less and more efficient reads 
     l_points := sdo_ordinate_array();
@@ -387,6 +394,7 @@ create or replace type body ShapefileReader is
         idx := idx + 1;
         pos := pos + 8;
         l_points(idx)  := utl_raw.cast_to_binary_double(utl_raw.substr(pointbuffer, 2 * (j-1) * ordbuffersize + 1 + ordbuffersize, ordbuffersize), UTL_RAW.LITTLE_ENDIAN);
+        dbms_output.put_line('' || pos || ' lpoint ' || l_points(idx));
         idx := idx + dim - 1;
         pos := pos + 8;
       end loop;
@@ -394,8 +402,10 @@ create or replace type body ShapefileReader is
     -- read the rest of the coordinates 
     for i in 1..lastn loop
       l_points(idx):= ShapefileReader.readDouble(self.m_shp, pos, utl_raw.little_endian);
+      dbms_output.put_line('' || pos || ' lpoint R1' || l_points(idx));
       idx := idx + 1;
       l_points(idx) := ShapefileReader.readDouble(self.m_shp, pos, utl_raw.little_endian);
+      dbms_output.put_line('' || pos || ' lpoint R2' || l_points(idx));
       idx := idx + dim - 1;
     end loop;
     -- read z values and m values if 3 or 4 dimensions. If the value is -Infinity, then use null as the value.
@@ -404,6 +414,7 @@ create or replace type body ShapefileReader is
       pos := pos + 16; -- skip range
       for i in 1..l_npoints loop
         l_points(idx) := ShapefileReader.readDouble(self.m_shp, pos, utl_raw.little_endian);
+        dbms_output.put_line('' || pos || ' lpointZ ' || l_points(idx));
         if l_points(idx) <= -99999999999999999999 then l_points(idx) := null; end if;
         idx := idx + 4;
       end loop;
@@ -411,6 +422,7 @@ create or replace type body ShapefileReader is
       pos := pos + 16; -- skip range
       for i in 1..l_npoints loop
         l_points(idx) := ShapefileReader.readDouble(self.m_shp, pos, utl_raw.little_endian);
+        dbms_output.put_line('' || pos || ' lpointM ' || l_points(idx));
         if l_points(idx) <= -99999999999999999999 then l_points(idx) := null; end if;
         idx := idx + 4;
       end loop;
@@ -602,6 +614,7 @@ create or replace type body ShapefileReader is
         --read a record header from the shapefile 
         l_shp_recordnumber := ShapefileReader.readInteger(self.m_shp, l_shp_pos, utl_raw.big_endian);
         l_shp_contentlength := ShapefileReader.readInteger(self.m_shp, l_shp_pos, utl_raw.big_endian);
+        dbms_output.put_line('record : ' || l_shp_recordnumber);
         -- based on the shapefile shape type, dispatch the record the appropriate function to create geometry.
         if self.m_shp_shapetype = 1 then
           self.Shape := self.readPoint(l_shp_pos, 2);
@@ -677,13 +690,26 @@ create or replace type body ShapefileReader is
       self.Attributes := null;
     end if;
   end;
+  member procedure MoveTo(p_index in integer) is
+    l_idx_pos pls_integer;
+    n pls_integer;
+    p pls_integer;
+  begin
+    l_idx_pos := 8 * (p_index - 1) + 101;
+    n := ShapefileReader.readInteger(self.m_shx, l_idx_pos, utl_raw.big_endian);
+    p := ShapefileReader.readInteger(self.m_shx, l_idx_pos, utl_raw.big_endian);
+    self.m_shp_pos := n*2 + 1;
+    self.m_dbf_pos := 33 + 32 * self.m_dbf_nFields + self.m_dbf_nHeaderBytes - (32* self.m_dbf_nFields + 31) + self.m_dbf_nRecordBytes * (p_index - 1) + 1;
+    self.MoveNext;
+  end;  
+  
   static function majorVersion return number is
   begin
     return 1;
   end;
   static function minorVersion return number is
   begin
-    return 1;
+    return 2;
   end;
   static function LastEditedBy return varchar2 is
   begin
@@ -691,10 +717,10 @@ create or replace type body ShapefileReader is
   end;
   static function lastModifiedDate return varchar2 is
   begin
-    return '$Date: 2023-05-19 10:38:43 -0500 (Fri, 19 May 2023) $';
+    return '$Date: 2024-10-03 14:23:28 -0500 (Thu, 03 Oct 2024) $';
   end;
   static function revision return varchar2 is
   begin
-    return '$Revision: 18187 $';
+    return '$Revision: 19581 $';
   end;
 end;

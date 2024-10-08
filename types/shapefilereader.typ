@@ -1,9 +1,9 @@
-create or replace type ShapefileReader as object ( 
+create or replace TYPE "SHAPEFILEREADER" as object ( 
   --------------------------------------------------------------------------------
-  -- Module   : $HeadURL: svn://gis.mvn.usace.army.mil/sandp/DatabaseScripts/ShapefileComponent/trunk/types/shapefilereader.typ $
+  -- Module   : $HeadURL: svn://b2imimcf@gis.mvn.usace.army.mil/sandp/DatabaseScripts/ShapefileComponent/trunk/types/shapefilereader.typ $
   -- Author   : grep
-  -- Date     : $Date: 2023-05-19 10:38:43 -0500 (Fri, 19 May 2023) $
-  -- Revision : $Revision: 18187 $
+  -- Date     : $Date: 2024-10-03 14:23:28 -0500 (Thu, 03 Oct 2024) $
+  -- Revision : $Revision: 19581 $
   -- Requires : Tables oracle_srid_xref, oracle_3d_srid_xref and types
   --            ShapefileDBFFieldList, ShapefileDBFField
   -- Usage    : ShapefileReader is a cursor that takes as input a zipfile containing 
@@ -31,7 +31,7 @@ create or replace type ShapefileReader as object (
   --
   -- Notes     : Version 1.0 - Initial release.
   --             Point MZ and Point M types lose the m values during read.
-  --             If the shapefile contains m values, but not z values, 
+  --             For other types, if the shapefile contains m values, but not z, 
   --             then calls to sdo_util.getvertices and similar functions will
   --             return the m value in the z column, otherwise it will be the w
   --             column.
@@ -40,6 +40,9 @@ create or replace type ShapefileReader as object (
   --             Version 1.1 - Added support for reading dbase (dbf files with no
   --             associated shp file). These are treated as shapefiles with
   --             no geometry.
+  --           
+  --             Version 1.2 - Added random access elements, including a Count
+  --             attribute and a MoveTo Procedure.
   --------------------------------------------------------------------------------
   -- public members (use these)
   -- sdo_geometry of the current record. This value is null prior to MoveNext being call
@@ -68,6 +71,9 @@ create or replace type ShapefileReader as object (
   -- Return one of the following strings: [Point, Line, Polygon, Multipoint], corresponding
   -- to the shape type of the shapefile. This attribute should only be read, not modified.
   ShapeType varchar2(20),
+  -- Number of rows or features in the open shapefile.
+  -- This attribute should only be read, not modified.
+  Count integer,
   -- private members (don't use these)
   m_dbf blob,
   m_dbf_pos number,
@@ -77,6 +83,7 @@ create or replace type ShapefileReader as object (
   m_dbf_nTotalBytes number,
   m_dbf_nFields number,
   m_shp blob,
+  m_shx blob,
   m_shp_pos number,
   m_shp_fileLength number,
   m_shp_shapeType number,
@@ -119,6 +126,7 @@ create or replace type ShapefileReader as object (
   member function HasNext return boolean,
   -- Move the next record in the shapefile, udpating the member variables to Shapefile and Attribute to that of the record.
   member procedure MoveNext,
+  member procedure MoveTo(p_index in integer),
   -- Return an integer between 0 and 100 inclusive, representing the percentage of the shapefile that has been read (by calls to MoveNext).
   -- This percentage is based on number of bytes read out of total bytes, not number of records read out of total records.
   member function GetProgress return integer,

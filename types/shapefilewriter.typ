@@ -1,9 +1,9 @@
-create or replace type ShapefileWriter as object (
+create or replace TYPE "SHAPEFILEWRITER" as object (
   --------------------------------------------------------------------------------
-  -- Module   : $HeadURL: svn://gis.mvn.usace.army.mil/sandp/DatabaseScripts/ShapefileComponent/trunk/types/shapefilewriter.typ $
+  -- Module   : $HeadURL: svn://b2imimcf@gis.mvn.usace.army.mil/sandp/DatabaseScripts/ShapefileComponent/trunk/types/shapefilewriter.typ $
   -- Author   : grep
-  -- Date     : $Date: 2023-10-02 12:04:09 -0500 (Mon, 02 Oct 2023) $
-  -- Revision : $Revision: 18552 $
+  -- Date     : $Date: 2024-10-03 14:23:28 -0500 (Thu, 03 Oct 2024) $
+  -- Revision : $Revision: 19581 $
   -- Requires : Types ShapefileDBFFieldList, ShapefileDBFField
   -- Usage    : ShapefileWriter writes rows of shapes and atrributes
   --            to a zipfile blob output representing a shapefile.
@@ -23,8 +23,9 @@ create or replace type ShapefileWriter as object (
   --             appearing at the end of some rows. 
   --             Added ability to configure shape type (like column types) 
   --             and to write empty shapefiles.
+  --             Version 1.2 (9/19/2024) - Fixed writing for 3 dimensional lines
+  --             and polygons. Fixed auto-calculation of shapefile geometry type.
   --------------------------------------------------------------------------------
-
   --private
   m_shpfile blob,
   m_shxfile blob,
@@ -48,13 +49,11 @@ create or replace type ShapefileWriter as object (
   m_columncount integer,
   m_fieldDefs shapefiledbffieldlist,
   m_fields shapefiledbffieldlist,
-
-
+  
   -- public functions (use these)
-
+  
   -- Create a new Shapefile Writer instance.
   constructor function ShapefileWriter return self as result,
-
   -- Set the configuration for a column. If a column in the input attributes to a susequent call
   -- to 'append' has the name, p_column_name, then use the length, type, and optionally the
   -- number of decimal places of the configuration to store the attribute data in the dbffile
@@ -72,11 +71,12 @@ create or replace type ShapefileWriter as object (
   -- If this procedure is not called, then the geometry will be defined by 
   -- the first call to append. Do not call this procedure after append is called.
   member procedure configureShapeColumn(p_shapeType in varchar2, p_hasZ in integer default 0, p_hasM in integer default 0),
+  
   -- add data to the shapefile, using p_shape for the geometry and p_attributes
   -- for the dbase table row. The geometry type and column names are defined
   -- by the inputs provided by the first call to this function.
   member procedure append(p_shape in sdo_geometry, p_attributes in clob),
-
+  
   -- finalize the shapefile and write it to the input, p_zipfile. 
   -- Within the zipfile, use the name, p_featureclass, as the basename
   -- for the components of the shapefile. If p_closezip is TRUE (default),
@@ -85,23 +85,24 @@ create or replace type ShapefileWriter as object (
   -- files. Caller must ensure than the last call to ShapefileWrite.finish is
   -- TRUE or that apex_zip.finish is otherwise called for the zip file.
   member procedure finish(p_zipfile in out nocopy blob, p_featureclass in varchar2, p_closezip in boolean default TRUE),
-
+  
   -- Set the well-known text as used in ArcGIS for the shapefile's spatial reference.
   -- This text will be added to the shapefile when 'finish' is called as a '.prj' file.
   member procedure setSpatialReferenceText(p_wkt in varchar2),
-
+  
   -- Type metadata functions
   static function majorVersion return number,
   static function minorVersion return number,
   static function LastEditedBy return varchar2,
   static function lastModifiedDate return varchar2,
   static function revision return varchar2,
-
+  
   --private 
   member procedure writeAppendIntegerShp(val in pls_integer, endianess in pls_integer default 2),
   member procedure writeAppendIntegerShpShx(val in pls_integer, endianess in pls_integer default 2),
   member procedure writeAppendDoubleShp(val in binary_double, endianess in pls_integer default 2),
   member procedure writeAppendDoubleShpShx(val in binary_double, endianess in pls_integer default 2),
   member procedure writeIntegerShp(pos in pls_integer, val in pls_integer, endianess in pls_integer default 2),
-  member procedure writeIntegerShpShx(pos in pls_integer, val in pls_integer, endianess in pls_integer default 2)
+  member procedure writeIntegerShpShx(pos in pls_integer, val in pls_integer, endianess in pls_integer default 2),
+  member procedure writeDoubleShpShx(pos in pls_integer, val in binary_double, endianess in pls_integer default 2)
 );
