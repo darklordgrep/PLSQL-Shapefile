@@ -1,5 +1,4 @@
-create or replace package body SHAPEFILE_UTIL is
-
+create or replace PACKAGE BODY "SHAPEFILE_UTIL" is
   function ShapefileJSON(p_shapefilezip in blob, p_srid in integer default null, p_featureclass in varchar2 default null) return clob is
     rt clob;
     l_geom sdo_geometry;
@@ -25,7 +24,6 @@ create or replace package body SHAPEFILE_UTIL is
       else
         l_geom := shapef.shape;
       end if;
-
       rt := rt || '{"type": "Feature", "geometry": '; 
       dbms_lob.append(rt, sdo_util.to_geojson(l_geom));
       rt := rt || ', "properties":';
@@ -41,7 +39,6 @@ create or replace package body SHAPEFILE_UTIL is
   begin
     return ShapefileTable(p_shapefilezip, null, null);
   end;
-
   function ShapefileTable(p_shapefilezip in blob, p_srid in integer) return shapefile_tab is
   begin
     return ShapefileTable(p_shapefilezip, p_srid, null);
@@ -89,7 +86,7 @@ create or replace package body SHAPEFILE_UTIL is
     for i in 1..l_files.count loop
       if regexp_instr(lower(l_files(i)), '\.shp$') > 0 then
         if not p_shapetype is null then
-          l_shapef := ShapefileReader(p_shapefilezip, substr(l_files(i), 1, length(l_files(i)) - 4));
+          l_shapef := ShapefileReader(p_shapefilezip, 4326, substr(l_files(i), 1, length(l_files(i)) - 4));
           if not l_shapef.ShapeType = p_shapetype then
             continue;
           end if;
@@ -107,8 +104,22 @@ create or replace package body SHAPEFILE_UTIL is
   function ListFields(p_shapefilezip in blob, p_featureclass in varchar2) return ShapefileDBFFieldList is
     l_shapef ShapefileReader;
   begin
-    l_shapef := ShapefileReader(p_shapefilezip, p_featureclass);
+    l_shapef := ShapefileReader(p_shapefilezip, 4326, p_featureclass);
     return l_shapef.Fields;
+  end;
+  
+  function GetFeatureCount(p_shapefilezip in blob, p_featureclass in varchar2 default null) return integer is
+    l_shapef ShapefileReader;
+  begin
+    l_shapef := ShapefileReader(p_shapefilezip, 4326, p_featureclass);
+    return l_shapef.Count;
+  end;
+  
+  function GetSpatialReferenceId(p_shapefilezip in blob, p_featureclass in varchar2 default null) return integer is
+    l_shapef ShapefileReader;
+  begin
+    l_shapef := ShapefileReader(p_shapefilezip, 4326, p_featureclass);
+    return l_shapef.SRID;
   end;
   
   function GenerateJSONQuery(p_shapefilezip in blob, p_srid in integer default null, p_featureclass in varchar2 default null, p_blobname in varchar2) return varchar2 is
@@ -171,24 +182,20 @@ create or replace package body SHAPEFILE_UTIL is
   begin
     return m_majorVersion;
   end;
-
   function minorVersion return number is
   begin
     return m_minorVersion;
   end;
-
   function lastEditedBy return varchar2 is
   begin
     return '$Author: b2imimcf $';
   end;
-
   function lastModifiedDate return varchar2 is
   begin
-    return '$Date: 2022-12-07 09:38:34 -0600 (Wed, 07 Dec 2022) $';
+    return '$Date: 2024-10-03 14:31:37 -0500 (Thu, 03 Oct 2024) $';
   end;
-
   function revision return varchar2 is
   begin
-    return '$Revision: 17630 $';
+    return '$Revision: 19582 $';
   end;
 end;
